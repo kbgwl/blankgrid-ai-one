@@ -59,8 +59,34 @@
               </div>
             </div>
             <button class="add-row" @click="addProvider">+ 添加服务商</button>
+
+            <!-- CEO 决策模型:巡视拍板与目标拆解走这个槽位,和岗位执行分开 -->
+            <div class="decision-slot" :class="{ dirty: dirty('decisionProvider') || dirty('decisionModel') }">
+              <div class="ds-head">
+                <b>CEO 决策模型</b>
+                <span class="ds-sub">只影响 CEO 的巡视拍板与目标拆解;岗位执行仍用主用服务商</span>
+                <span class="badge sm" :class="dsState.ok === null ? '' : (dsState.ok ? 'ok' : 'err')">{{ dsState.label }}</span>
+              </div>
+              <div class="prov-grid">
+                <label class="pf"><span>服务商</span>
+                  <el-select v-model="form.decisionProvider" size="small" placeholder="跟随主用">
+                    <el-option label="跟随主用服务商" value="" />
+                    <el-option v-for="(p, i) in form.providers" :key="i" :label="p.name || '未命名服务商'" :value="p.name" />
+                  </el-select>
+                </label>
+                <label class="pf"><span>模型名</span>
+                  <el-input v-model="form.decisionModel" size="small" :placeholder="decisionModelHint" />
+                </label>
+                <label class="pf check"><span></span>
+                  <el-button size="small" plain :loading="dsState.run" @click="testDecision">测一次</el-button>
+                </label>
+              </div>
+              <p class="ds-now">当前生效:<b>{{ decisionEffective }}</b>
+                <span v-if="dsState.detail" class="ds-detail" :class="dsState.ok ? 'ok' : 'err'">{{ dsState.detail }}</span>
+              </p>
+            </div>
           </div>
-          <p class="tip">「检测连通」只从浏览器确认网关地址能否访问与往返耗时,不会带上密钥;密钥与模型是否真的有效,要等后端提供检测接口。</p>
+          <p class="tip">「检测连通」只从浏览器确认网关地址能否访问;「测一次」由后端真发一条最小请求,验证密钥与模型名确实可用,密钥不出本机、不回显。</p>
         </section>
 
         <!-- ===== 质量与目标 ===== -->
@@ -173,7 +199,8 @@ import { api } from '../api'
 const defaults = {
   providers: [], knowledgeBase: '', concurrency: 4, dailyTokenBudget: 0,
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
-  reviewThreshold: 85, maxReviewRounds: 2, autoStartGoals: true
+  reviewThreshold: 85, maxReviewRounds: 2, autoStartGoals: true,
+  decisionProvider: '', decisionModel: ''
 }
 
 const form = ref({ ...defaults })
@@ -248,6 +275,44 @@ function addProvider() {
   form.value.providers.push({ name: '', baseUrl: '', apiKey: '', model: '', primary: !form.value.providers.length })
 }
 function removeProvider(i) { form.value.providers.splice(i, 1) }
+
+/* ===== CEO 决策模型槽位 ===== */
+const dsState = reactive({ run: false, ok: null, label: '未检测', detail: '' })
+/* 服务商没点名就跟随主用,和后端 decisionProvider() 的解析口径保持一致 */
+const dsResolved = computed(() => {
+  const list = form.value.providers || []
+  const named = list.find(p => p.name && p.name === form.value.decisionProvider)
+  return named || list.find(p => p.primary) || list[0] || null
+})
+const decisionModelHint = computed(() => {
+  const p = dsResolved.value
+  return p && p.model ? `默认用 ${p.model}` : '留空则用该服务商默认模型'
+})
+const decisionEffective = computed(() => {
+  const p = dsResolved.value
+  if (!p) return '还没有任何服务商,CEO 无法决策'
+  const model = String(form.value.decisionModel || '').trim() || p.model || '未填模型名'
+  const follow = p.name && p.name === form.value.decisionProvider ? '' : '(槽位未点名,跟随主用)'
+  return `${p.name || '未命名服务商'}${follow} · ${model}`
+})
+async function testDecision() {
+  dsState.run = true
+  dsState.label = '后端实测中'
+  dsState.detail = ''
+  try {
+    const r = await api.settingsTest({ scope: 'decision', model: String(form.value.decisionModel || '').trim() })
+    dsState.ok = !!r.ok
+    // 徽章只留一句结论,模型回了什么全文挪到下一行,免得长回复把徽章撑成长条
+    dsState.label = r.ok ? `${r.ms}ms · 模型已应答` : '调用失败'
+    dsState.detail = r.message || ''
+  } catch (e) {
+    dsState.ok = false
+    dsState.label = '检测请求没发出去'
+    dsState.detail = e?.message || '网络异常'
+  } finally {
+    dsState.run = false
+  }
+}
 
 function jump(id) {
   activeSection.value = id
@@ -442,6 +507,23 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .probe-btn:hover:not(:disabled) { color: var(--glow-cyan); border-color: rgba(var(--rgb-glow), .4); }
 .probe-btn:disabled { opacity: .5; cursor: not-allowed; }
 .prov-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+/* CEO 决策模型槽位:比服务商多一道左侧光边,标明这是决策中枢而不是一条普通配置 */
+.decision-slot {
+  position: relative; border: 1px solid var(--border-hair); border-left: 2px solid rgba(var(--rgb-glow), .55);
+  border-radius: 11px; background: var(--tint-soft); padding: 13px 15px; margin: 16px 0 2px;
+  transition: border-color .35s var(--ease-quiet);
+}
+.decision-slot:hover { border-color: rgba(var(--rgb-glow), .3); border-left-color: var(--glow-cyan); }
+.decision-slot.dirty { border-left-color: rgba(var(--rgb-warn), .8); }
+.ds-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ds-head b { font-size: 12.5px; font-weight: 400; letter-spacing: .1em; color: var(--text-moon); }
+.ds-head .badge { margin-left: auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-sub { font-size: 10.5px; letter-spacing: .04em; color: var(--text-faint); }
+.ds-now { margin: 12px 0 0; font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.ds-now b { font-weight: 400; color: var(--glow-cyan); }
+.ds-detail { display: block; margin-top: 5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-detail.ok { color: var(--st-ok); opacity: .78; }
+.ds-detail.err { color: var(--st-error); }
 .pf { display: flex; flex-direction: column; gap: 5px; width: 190px; }
 .pf.wide { flex: 1; min-width: 260px; }
 .pf.check { width: auto; justify-content: flex-end; }

@@ -178,7 +178,9 @@ public class CompanyEngineService {
                 + "\n\n【你的职责边界】\n你只做公司级拆解:把目标分给最合适的部门负责人。你不亲自写交付物,不替部门决定具体执行细节。";
         String user = buildPlanPrompt(g, departments);
 
-        String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)), ceo.getModel(), null);
+        // 目标拆解同样是 CEO 的决策,和巡视走同一个决策模型槽位
+        String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                settings.decisionModel(ceo.getModel()), null, settings.decisionProvider());
         tokenRepo.save(new TokenLog(null, goalId, "CEO_PLAN",
                 CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length())));
 

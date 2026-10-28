@@ -48,6 +48,8 @@ export const api = {
   stats: () => http.get('/stats').then(r => r.data),
   settings: () => http.get('/settings').then(r => r.data),
   saveSettings: (s) => http.put('/settings', s).then(r => r.data),
+  // 自检是真发一次模型请求,给它 25 秒上限:后端没起来时要失败而不是把按钮挂死
+  settingsTest: (body) => http.post('/settings/test', body || {}, { timeout: 25000 }).then(r => r.data),
 
   opsFeed: () => http.get('/ops/feed').then(r => r.data),
   setGoal: (content) => http.post('/ops/goal', { content }).then(r => r.data),

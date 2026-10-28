@@ -267,7 +267,8 @@ public class CeoLoopService {
         }
 
         List<ChatMessage> messages = List.of(new ChatMessage("system", sys), new ChatMessage("user", sb.toString()));
-        String reply = llm.chatStream(messages, null, null);
+        // 巡视拍板是公司的决策中枢:走「设置 → 决策模型」独立槽位,没单独配就跟随主用
+        String reply = llm.chatStream(messages, settings.decisionModel(null), null, settings.decisionProvider());
         tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(null, "CEO",
                 estimateTokens(sb.length() + sys.length() + reply.length())));
         return reply;

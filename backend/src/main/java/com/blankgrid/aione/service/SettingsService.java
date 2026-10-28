@@ -52,6 +52,10 @@ public class SettingsService {
         public int maxReviewRounds = 2;
         /** 目标创建后自动拆解 */
         public boolean autoStartGoals = true;
+        /** CEO 决策(巡视拍板 + 目标拆解)专用服务商名;null=未提供,空串=跟随主用 */
+        public String decisionProvider;
+        /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
+        public String decisionModel;
         /** API 返回给前端时隐藏密钥 */
         public transient boolean masked = false;
     }
@@ -97,6 +101,9 @@ public class SettingsService {
         if (incoming.reviewThreshold > 0) current.reviewThreshold = Math.min(100, incoming.reviewThreshold);
         if (incoming.maxReviewRounds > 0) current.maxReviewRounds = Math.min(5, incoming.maxReviewRounds);
         current.autoStartGoals = incoming.autoStartGoals;
+        // 决策模型槽位:只在请求真的带了这两个字段时才覆盖(老客户端不传就不会被清空)
+        if (incoming.decisionProvider != null) current.decisionProvider = incoming.decisionProvider.trim();
+        if (incoming.decisionModel != null) current.decisionModel = incoming.decisionModel.trim();
         // 口令:空或掩码回传则保留原值;__CLEAR__ 表示清除
         if ("__CLEAR__".equals(incoming.password)) {
             current.password = "";
@@ -115,6 +122,27 @@ public class SettingsService {
     public Provider primaryProvider() {
         return get().providers.stream().filter(p -> p.primary).findFirst()
                 .orElse(get().providers.isEmpty() ? null : get().providers.get(0));
+    }
+
+    /** CEO 决策走哪个服务商:槽位点了名就用它,没点或找不到就退回主用 */
+    public Provider decisionProvider() {
+        Provider hit = providerByName(get().decisionProvider);
+        return hit != null ? hit : primaryProvider();
+    }
+
+    /** 按名称取服务商(名称是用户自己起的,不含密钥) */
+    public Provider providerByName(String name) {
+        if (name == null || name.isBlank() || get().providers == null) return null;
+        return get().providers.stream().filter(p -> name.equals(p.name)).findFirst().orElse(null);
+    }
+
+    /** CEO 决策用的模型名:槽位 > 传入的兜底 > 该服务商默认 */
+    public String decisionModel(String fallback) {
+        String m = get().decisionModel;
+        if (m != null && !m.isBlank()) return m;
+        if (fallback != null && !fallback.isBlank()) return fallback;
+        Provider p = decisionProvider();
+        return p == null ? null : p.model;
     }
 
     /** 是否有可用模型配置(不检查 key,兼容本地 Ollama 等无鉴权服务) */
