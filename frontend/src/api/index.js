@@ -85,17 +85,24 @@ export const api = {
   adoptArtifact: (id) => http.post(`/artifacts/${id}/adopt`).then(r => r.data),
 
   // 落盘:写进设置页指定的目录,返回真实路径而不是让浏览器再下载一份
-  exportGoalToDir: (id) => http.post(`/goals/${id}/export-to-dir`, {}, { timeout: 30000 }).then(r => r.data),
-  exportArtifactToDir: (id) => http.post(`/artifacts/${id}/export-to-dir`, {}, { timeout: 20000 }).then(r => r.data),
+  // format: md / docx / pptx / pdf / all(默认 all,四种格式都写)
+  exportGoalToDir: (id, format) => http.post(`/goals/${id}/export-to-dir`, {}, { params: format ? { format } : {}, timeout: 60000 }).then(r => r.data),
+  exportArtifactToDir: (id, format) => http.post(`/artifacts/${id}/export-to-dir`, {}, { params: format ? { format } : {}, timeout: 60000 }).then(r => r.data),
 
-  downloadGoal: async (id, title) => {
-    const r = await http.get(`/goals/${id}/export`, { responseType: 'blob' })
-    saveBlob(r.data, `${safeName(title)}.zip`)
+  // 多格式下载:不传 format 就是原来的 zip / md
+  downloadGoal: async (id, title, format) => {
+    const q = format ? `?format=${format}` : ''
+    const r = await http.get(`/goals/${id}/export${q}`, { responseType: 'blob', timeout: 60000 })
+    saveBlob(r.data, format ? `${safeName(title)}-全书.${format}` : `${safeName(title)}.zip`)
   },
-  downloadArtifact: async (id, title) => {
-    const r = await http.get(`/artifacts/${id}/download`, { responseType: 'blob' })
-    saveBlob(r.data, `${safeName(title)}.md`)
-  }
+  downloadArtifact: async (id, title, format) => {
+    const ext = format || 'md'
+    const r = await http.get(`/artifacts/${id}/download?format=${ext}`, { responseType: 'blob', timeout: 60000 })
+    saveBlob(r.data, `${safeName(title)}.${ext}`)
+  },
+
+  // 成本:token 折算成钱
+  cost: () => http.get('/stats/cost').then(r => r.data)
 }
 
 function safeName(s) {

@@ -38,9 +38,17 @@ class GoalServiceBudgetTest {
         svc = new GoalService(goalRepo, wsRepo,
                 mock(DeliverableRepository.class), mock(ArtifactRepository.class),
                 activityRepo, mock(TokenLogRepository.class),
-                mock(EventPusher.class), mock(ApplicationEventPublisher.class), new ObjectMapper());
+                mock(EventPusher.class), mock(ApplicationEventPublisher.class), new ObjectMapper(),
+                costMock());
         when(goalRepo.save(any(Goal.class))).thenAnswer(i -> i.getArgument(0));
         when(wsRepo.countByGoalId(anyLong())).thenReturn(1L);
+    }
+
+    /** 成本折算与预算逻辑无关,这里只要不 NPE 即可 */
+    private CostService costMock() {
+        CostService c = mock(CostService.class);
+        when(c.ofGoal(any())).thenReturn(0.0);
+        return c;
     }
 
     private Goal budgetPaused() {

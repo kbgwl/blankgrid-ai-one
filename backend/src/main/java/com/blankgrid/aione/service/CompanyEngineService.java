@@ -204,10 +204,11 @@ public class CompanyEngineService {
         String user = buildPlanPrompt(g, departments);
 
         // 目标拆解同样是 CEO 的决策,和巡视走同一个决策模型槽位
+        String planModel = settings.decisionModel(ceo.getModel());
         String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
-                settings.decisionModel(ceo.getModel()), null, settings.decisionProvider());
+                planModel, null, settings.decisionProvider());
         tokenRepo.save(new TokenLog(null, goalId, "CEO_PLAN",
-                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length())));
+                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), planModel));
 
         JsonNode root;
         try {
@@ -297,6 +298,9 @@ public class CompanyEngineService {
         sb.append("6. 交付物必须是对目标直接有用的成品(文案、页面内容、方案、报告、代码、设计说明)。"
                 + "禁止把“核对清单”“执行台账”“自检表”“边界说明”“工作计划”这类过程性产物当成交付物;"
                 + "只有目标本身明确要求时,才产出清单类文件。\n");
+        sb.append("6.1 一件产出只能算一项:「品牌视觉方案」就不要再单列「字体层级规格」「色板与间距规范」;"
+                + "「产品方案」就不要再单列「token 用量核算表」「指标口径字典」。"
+                + "这类附属内容并进成品章节,单独立项只会多派一次活、多评委一次,预算烧在同一件事上。\n");
         sb.append("7. 验收标准必须能被机械核对,但不许写无法机械判定的绝对化限定:"
                 + "不要写“全部中文”“不含任何英文”“文字必须完美”这类;"
                 + "确实需要限定语种或形式时,写明例外(如“中文表述,行业通用缩写 AI/API 等与专有名词除外”)。\n");
@@ -356,9 +360,10 @@ public class CompanyEngineService {
                 + "\n\n你是部门负责人,只负责把工作流拆成可执行、可验收的交付物,并指定执行人。你不亲自写交付物正文。";
         String user = buildWorkstreamPrompt(g, ws, lead, team);
 
+        String leadModel = (lead.getModel() != null && !lead.getModel().isBlank()) ? lead.getModel() : settings.defaultModel();
         String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)), lead.getModel(), null);
         tokenRepo.save(new TokenLog(null, g.getId(), "LEAD_PLAN",
-                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length())));
+                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), leadModel));
 
         JsonNode root;
         try {
@@ -373,6 +378,9 @@ public class CompanyEngineService {
         Map<Integer, Long> indexToId = new LinkedHashMap<>();
         Map<Long, Integer> pendingDep = new LinkedHashMap<>();
         List<String> merged = new ArrayList<>();
+        // 本工作流内已立项的 [id, 标题, 责任人id]:附属物的宿主只能从这里选,
+        // 跨工作流合并会把设计的东西塞进文案里,那是另一种错。
+        List<String[]> local = new ArrayList<>();
         int order = 0;
         String deptName = ws.getDepartment() == null ? "部门" : ws.getDepartment().getName();
         // 两个部门可能同时拆活:读已有清单与落库必须在同一把锁里,否则各自都看不到对方刚写进去的东西
@@ -393,6 +401,26 @@ public class CompanyEngineService {
                     }
                     Employee owner = findTeamMember(team, node.path("ownerId").asLong(0));
                     if (owner == null) owner = lead;
+
+                    // 粒度闸门:规格/台账/清单这类附属物不再单独占用一条生产线,
+                    // 并进同一责任人的成品里当章节或附表。合并是显式记账的,内容不会凭空消失。
+                    if (DeliverableGuard.isAttachment(title)) {
+                        String[] host = DeliverableGuard.host(title, local, owner == null ? null : owner.getId());
+                        if (host != null) {
+                            Long hostId = Long.parseLong(host[0]);
+                            Deliverable hd = delRepo.findById(hostId).orElse(null);
+                            if (hd != null) {
+                                hd.setBrief(clip(nz(hd.getBrief())
+                                        + DeliverableGuard.mergeNote(title, node.path("brief").asText("")), 8000));
+                                hd.setUpdatedAt(Instant.now());
+                                delRepo.save(hd);
+                                indexToId.put(myIndex, hostId);
+                                merged.add("「" + title + "」是附属物,并进「" + host[1] + "」");
+                                continue;
+                            }
+                        }
+                    }
+
                     Deliverable d = new Deliverable();
                     d.setGoal(g);
                     d.setWorkstream(ws);
@@ -410,7 +438,10 @@ public class CompanyEngineService {
                     d.setStatus(Deliverable.PENDING);
                     Deliverable saved = delRepo.save(d);
                     created.add(saved);
-                    existing.add(new String[]{String.valueOf(saved.getId()), title});
+                    existing.add(new String[]{String.valueOf(saved.getId()), title,
+                            owner == null ? "" : String.valueOf(owner.getId())});
+                    local.add(new String[]{String.valueOf(saved.getId()), title,
+                            owner == null ? "" : String.valueOf(owner.getId())});
                     indexToId.put(myIndex, saved.getId());
                     JsonNode deps = node.path("dependsOn");
                     if (deps.isArray() && !deps.isEmpty()) pendingDep.put(saved.getId(), deps.get(0).asInt(-1));
@@ -429,7 +460,7 @@ public class CompanyEngineService {
         }
         if (!merged.isEmpty()) {
             activity(Activity.REPORT, "「" + deptName + "」有 " + merged.size()
-                    + " 项与其他部门重复,已合并,不重复开工:" + clip(String.join(";", merged), 600), g.getId());
+                    + " 项被合并(重复开工或只是附属台账),不再单独占一条生产线:" + clip(String.join(";", merged), 600), g.getId());
         }
         if (created.isEmpty() && merged.isEmpty()) {
             // 负责人没拆出有效交付物时,至少保证工作流有一个可验收出口
@@ -465,11 +496,12 @@ public class CompanyEngineService {
         pushGoal(g.getId());
     }
 
-    /** 同一目标下已有交付物的 [id, 标题],供跨部门查重。 */
+    /** 同一目标下已有交付物的 [id, 标题, 责任人id],供跨部门查重。 */
     private List<String[]> goalDeliverableTitles(Long goalId) {
         List<String[]> out = new ArrayList<>();
         for (Deliverable d : delRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId)) {
-            out.add(new String[]{String.valueOf(d.getId()), d.getTitle() == null ? "" : d.getTitle()});
+            out.add(new String[]{String.valueOf(d.getId()), d.getTitle() == null ? "" : d.getTitle(),
+                    d.getOwner() == null ? "" : String.valueOf(d.getOwner().getId())});
         }
         return out;
     }
@@ -507,6 +539,10 @@ public class CompanyEngineService {
         sb.append("7. 交付物必须是目标读者拿来就能用的成品。禁止把“核对清单”“执行台账”“自检表”"
                 + "“边界说明”“进度计划”这类过程性产物当成交付物 —— 它们是评审的工作,不是成果。"
                 + "只有工作流明确要求清单时才产出清单。\n");
+        sb.append("7.1 也不要把一件产出切成几片来凑数:“字体层级规格”“色板与间距规范”“图标命名清单”"
+                + "“token 用量核算表”“指标口径字典”这类附属台账,必须并进对应的成品里当章节或附表,"
+                + "不能单独立一项。判断标准:去掉它,成品还能不能直接用?能,它就是附属物。"
+                + "交付物数量不必凑满,两项扎实的成品好过六项切片。\n");
         sb.append("8. 缺信息分两种处理:文风、篇幅、结构这类可以假设,写进 brief;"
                 + "产品功能名、真实数据、价格、资质这类必须核实的事实,写进 needsInput,不要编造。\n");
         sb.append("9. 验收标准要可机械核对,但禁止无法机械判定的绝对化限定:不写“全部中文”“不含英文”“完美”这类;"

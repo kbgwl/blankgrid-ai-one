@@ -165,6 +165,44 @@
           </div>
         </section>
 
+        <!-- ===== 成本与格式 ===== -->
+        <section id="cost" class="set-card glass" :style="{ '--i': 2 }">
+          <div class="set-card-head">
+            <div>
+              <h3>成本核算与导出格式</h3>
+              <p>「今日烧了 60 万 token」没法决策,「今天花了 ¥4.20」才能。单价按元 / 百万 token 计,改了就按你改的算。</p>
+            </div>
+            <span class="badge ok">今日 {{ money(costInfo.today) }} · 累计 {{ money(costInfo.total) }}</span>
+          </div>
+          <div class="set-body">
+            <div class="set-row" :class="{ dirty: dirty('pdfFontPath') }">
+              <div class="lbl"><b>PDF 中文字体</b><span>留空自动找系统字体(微软雅黑 / 黑体 / Noto);找不到时 PDF 里的中文会变方块</span></div>
+              <div class="ctl wide-ctl">
+                <el-input v-model="form.pdfFontPath" placeholder="留空 = 自动" size="small" clearable />
+                <span class="font-hint">{{ exportInfo.pdfFont ? '已找到:' + exportInfo.pdfFont : '未找到中文字体' }}</span>
+              </div>
+            </div>
+            <div class="price-head">
+              <div>
+                <b>模型单价</b>
+                <span>元 / 百万 token。token 账本只记总量,按输入:输出 = 3:1 折算。</span>
+              </div>
+              <el-button size="small" text @click="resetPrices">恢复参考价</el-button>
+            </div>
+            <div class="price-list">
+              <div class="price-row price-title"><span>模型</span><span>输入</span><span>输出</span></div>
+              <div class="price-row" v-for="p in priceRows" :key="p.model">
+                <span class="pm">{{ p.model }}</span>
+                <el-input-number v-model="p.input" :min="0" :step="0.5" :precision="2" size="small"
+                                 controls-position="right" @change="touchPrices" />
+                <el-input-number v-model="p.output" :min="0" :step="0.5" :precision="2" size="small"
+                                 controls-position="right" @change="touchPrices" />
+              </div>
+            </div>
+            <p class="path-line">已记录模型:<code>{{ costModelLine }}</code></p>
+          </div>
+        </section>
+
         <!-- ===== 公司与权限 ===== -->
         <section id="company" class="set-card glass" :style="{ '--i': 3 }">
           <div class="set-card-head">
@@ -259,7 +297,9 @@ const defaults = {
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
   reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
   decisionProvider: '', decisionModel: '',
-  exportDir: '', autoExportArtifacts: true
+  exportDir: '', autoExportArtifacts: true,
+  // null = 请求里不带这个字段,后端保留原值;用户真改了单价才变成数组
+  pricing: null, pdfFontPath: ''
 }
 
 const form = ref({ ...defaults })
@@ -272,7 +312,9 @@ const loadError = ref('')
 const savedFlash = ref(false)
 const hasProvider = ref(null)
 const avgScore = ref(null)
-const exportInfo = reactive({ dir: '', writable: false, checked: false })
+const exportInfo = reactive({ dir: '', writable: false, checked: false, pdfFont: '' })
+const costInfo = reactive({ today: 0, total: 0, models: [] })
+const priceRows = ref([])
 const showAdvanced = ref(false)
 const activeSection = ref('models')
 const probes = reactive({})
@@ -281,9 +323,44 @@ const navItems = [
   { id: 'models', label: '模型服务' },
   { id: 'quality', label: '质量与目标' },
   { id: 'output', label: '成果落盘' },
+  { id: 'cost', label: '成本与导出' },
   { id: 'company', label: '公司与权限' },
   { id: 'data', label: '数据与备份' }
 ]
+
+/* ===== 成本:token 折算成钱 ===== */
+const costModelLine = computed(() => {
+  const list = costInfo.models || []
+  if (!list.length) return '还没有模型调用记录'
+  return list.map(m => `${m.model} ${fmtTokens(m.tokensTotal)} token / ${money(m.costTotal)}`).join(' · ')
+})
+function fmtTokens(n) {
+  n = Number(n || 0)
+  return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
+}
+function money(v) {
+  const n = Number(v || 0)
+  if (n <= 0) return '¥0'
+  return '¥' + (n < 10 ? n.toFixed(2) : n.toFixed(1))
+}
+/** 用户动了单价才把整张表提交上去,否则保留后端原值 */
+function touchPrices() {
+  form.value.pricing = priceRows.value.map(p => ({ model: p.model, input: Number(p.input) || 0, output: Number(p.output) || 0 }))
+}
+function resetPrices() {
+  loadCost()
+  form.value.pricing = []
+  ElMessage({ message: '已恢复参考价,保存后生效', type: 'info', plain: true })
+}
+async function loadCost() {
+  try {
+    const r = await api.cost()
+    costInfo.today = r.today || 0
+    costInfo.total = r.total || 0
+    costInfo.models = r.models || []
+    priceRows.value = (r.prices || []).map(p => ({ model: p.model, input: p.input, output: p.output }))
+  } catch (e) { /* 成本拉不到不影响设置页 */ }
+}
 
 const dirtyKeys = computed(() => {
   if (!base.value) return []
@@ -455,6 +532,7 @@ async function loadExportInfo() {
     const r = await api.exportStatus()
     exportInfo.dir = r.dir || ''
     exportInfo.writable = !!r.writable
+    exportInfo.pdfFont = r.pdfFont || ''
     exportInfo.checked = true
   } catch (e) {
     exportInfo.checked = true
@@ -536,6 +614,7 @@ async function clearPassword() {
 onMounted(async () => {
   await load()
   loadBackups()
+  loadCost()
 })
 onBeforeUnmount(() => observer && observer.disconnect())
 </script>
@@ -637,6 +716,25 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .tip { margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--border-hair); font-size: 11px; line-height: 1.8; color: var(--text-faint); }
 .path-line { margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--border-hair); font-size: 11px; color: var(--text-faint); }
 .path-line code { font-family: var(--font-mono); font-size: 11px; color: var(--glow-cyan-dim); word-break: break-all; }
+
+/* ===== 成本与导出 ===== */
+.font-hint { font-size: 10.5px; color: var(--text-faint); letter-spacing: .06em; white-space: nowrap; }
+.price-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+  margin: 18px 0 8px; padding-top: 14px; border-top: 1px dashed var(--border-hair);
+}
+.price-head b { display: block; font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
+.price-head span { display: block; margin-top: 4px; font-size: 10.5px; color: var(--text-faint); }
+.price-list { display: flex; flex-direction: column; gap: 6px; }
+.price-row {
+  display: grid; grid-template-columns: 1fr 118px 118px; align-items: center; gap: 10px;
+}
+.price-row .pm { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim); }
+.price-title span {
+  font-size: 10px; letter-spacing: .16em; color: var(--text-faint);
+}
+.price-title .pm { font-family: var(--font-sans); }
+.price-row .el-input-number { width: 100%; }
 .tip b { font-family: var(--font-mono); font-weight: 400; color: var(--text-dim); }
 /* 改过还没保存的行:左侧一个亮点 */
 .set-row.dirty::after, .prov.dirty::after {

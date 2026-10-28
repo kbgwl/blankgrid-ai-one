@@ -29,12 +29,14 @@ public class StatsController {
     private final GoalRepository goalRepo;
     private final DeliverableRepository delRepo;
     private final ArtifactRepository artRepo;
+    private final com.blankgrid.aione.service.CostService costs;
 
     public StatsController(TaskRepository taskRepo, EmployeeRepository empRepo,
                            com.blankgrid.aione.repo.TokenLogRepository tokenRepo,
                            com.blankgrid.aione.service.SettingsService settingsService,
                            GoalRepository goalRepo, DeliverableRepository delRepo,
-                           ArtifactRepository artRepo) {
+                           ArtifactRepository artRepo,
+                           com.blankgrid.aione.service.CostService costs) {
         this.taskRepo = taskRepo;
         this.empRepo = empRepo;
         this.tokenRepo = tokenRepo;
@@ -42,6 +44,7 @@ public class StatsController {
         this.goalRepo = goalRepo;
         this.delRepo = delRepo;
         this.artRepo = artRepo;
+        this.costs = costs;
     }
 
     @GetMapping
@@ -77,6 +80,23 @@ public class StatsController {
         m.put("artifactsApproved", artRepo.countByStatus(Artifact.APPROVED));
         m.put("qualityThreshold", settingsService.get().reviewThreshold);
         m.put("hasProvider", settingsService.hasProvider());
+        // 成本折算:界面上「今日 token 60.9 万」换成「今天花了 ¥x.xx」
+        m.put("costToday", costs.today());
+        m.put("costTotal", costs.total());
+        m.put("costCurrency", "CNY");
+        return m;
+    }
+
+    /** 按模型拆开的花费,给设置页 / 看板画表 */
+    @GetMapping("/cost")
+    public Map<String, Object> cost() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("currency", "CNY");
+        m.put("today", costs.today());
+        m.put("total", costs.total());
+        m.put("models", costs.breakdown());
+        m.put("prices", costs.prices());
+        m.put("note", "按输入:输出 = 3:1 折算,单价见设置 → 模型单价");
         return m;
     }
 }

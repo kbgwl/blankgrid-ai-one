@@ -28,12 +28,13 @@ public class GoalService {
     private final EventPusher pusher;
     private final ApplicationEventPublisher publisher;
     private final ObjectMapper mapper;
+    private final CostService costs;
 
     public GoalService(GoalRepository goalRepo, WorkstreamRepository wsRepo,
                        DeliverableRepository delRepo, ArtifactRepository artRepo,
                        ActivityRepository activityRepo, TokenLogRepository tokenRepo,
                        EventPusher pusher, ApplicationEventPublisher publisher,
-                       ObjectMapper mapper) {
+                       ObjectMapper mapper, CostService costs) {
         this.goalRepo = goalRepo;
         this.wsRepo = wsRepo;
         this.delRepo = delRepo;
@@ -43,6 +44,7 @@ public class GoalService {
         this.pusher = pusher;
         this.publisher = publisher;
         this.mapper = mapper;
+        this.costs = costs;
     }
 
     /** 创始人下达目标:公司立即开始拆解,无需再点任何按钮。 */
@@ -205,6 +207,8 @@ public class GoalService {
         m.put("blocked", blocked);
         m.put("artifacts", artifacts);
         m.put("tokens", tokenRepo.tokensOfGoal(g.getId()));
+        // token 数对创始人没有决策价值,折算成钱才有
+        m.put("cost", costs.ofGoal(g.getId()));
         List<Map<String, Object>> depts = new ArrayList<>();
         for (Workstream stream : wsRepo.findByGoalIdOrderBySortOrderAscIdAsc(g.getId())) {
             if (stream.getDepartment() == null) continue;

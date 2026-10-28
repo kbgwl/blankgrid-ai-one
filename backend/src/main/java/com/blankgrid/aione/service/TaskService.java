@@ -243,6 +243,9 @@ public class TaskService {
 
             StringBuilder sb = new StringBuilder();
             int promptChars = sys.length() + task.getInstruction().length() + (task.getContextText() == null ? 0 : task.getContextText().length());
+            // 记账要记清是哪个模型烧的:不同模型差十倍价,只记 token 数算不出钱
+            String usedModel = (task.getModel() != null && !task.getModel().isBlank())
+                    ? task.getModel() : settings.defaultModel();
             String result = llm.chatStream(messages, task.getModel(), delta -> {
                 if (cancelled.contains(taskId)) throw new TaskCancelledException();
                 sb.append(delta);
@@ -253,7 +256,8 @@ public class TaskService {
             });
 
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
-                    CeoLoopService.estimateTokens(promptChars + result.length())));
+                    CeoLoopService.estimateTokens(promptChars + result.length()),
+                    usedModel));
 
             // 复盘任务完成:教训沉淀进全员知识库 + 岗位自己的成长档案(自学习闭环)
             if (task.getInstruction() != null && task.getInstruction().startsWith(RETRO_TAG)) {

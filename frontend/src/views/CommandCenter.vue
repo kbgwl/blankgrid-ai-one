@@ -19,6 +19,7 @@
 
         <div class="composer glass">
           <div class="composer-main">
+            <label class="field-label">公司目标<i>必填</i></label>
             <el-input
               v-model="form.title"
               class="goal-title-input"
@@ -26,13 +27,14 @@
               maxlength="300"
               @keyup.enter="create"
             />
+            <label class="field-label">补充背景<i>可选</i></label>
             <el-input
               v-model="form.brief"
               class="goal-brief-input"
               type="textarea"
               :rows="3"
               resize="none"
-              placeholder="补充背景、目标用户、必须包含的内容。信息越具体,拆解越准。(可选)"
+              placeholder="目标用户、必须包含的内容、对外口径。信息越具体,拆解越准。"
             />
           </div>
 
@@ -54,7 +56,8 @@
               未配置大模型 · 去设置
             </span>
             <div class="spacer"></div>
-            <el-button class="launch-btn" :loading="creating" :disabled="!form.title.trim()" @click="create">
+            <span v-if="!canLaunch" class="launch-hint">先写下目标,或点「试试」里的例子</span>
+            <el-button class="launch-btn" :class="{ 'is-idle': !canLaunch }" :loading="creating" @click="create">
               下达目标
               <span class="arrow">→</span>
             </el-button>
@@ -94,6 +97,7 @@
       <div class="pulse-card glass" v-for="s in pulseCards" :key="s.label" :class="{ 'is-pulse': pulseHot.has(s.label) }">
         <div class="pulse-num" :class="{ cyan: s.cyan, warn: s.warn }">{{ s.value }}</div>
         <div class="pulse-label">{{ s.label }}</div>
+        <div v-if="s.hint" class="pulse-hint">{{ s.hint }}</div>
         <div class="pulse-line" :class="{ cyan: s.cyan }"></div>
       </div>
     </section>
@@ -175,7 +179,7 @@
             <div class="metric"><b>{{ g.workstreams }}</b><span>工作流</span></div>
             <div class="metric"><b>{{ g.artifacts }}</b><span>成果</span></div>
             <div class="metric"><b :class="{ good: g.goal.finalScore >= threshold }">{{ g.goal.finalScore || '—' }}</b><span>均分</span></div>
-            <div class="metric"><b>{{ fmtTokens(g.tokens) }}</b><span>tokens</span></div>
+            <div class="metric"><b>{{ money(g.cost) }}</b><span>花费</span></div>
           </div>
 
           <div v-if="g.blocked" class="blocked">
@@ -277,6 +281,12 @@ const presets = [
 ]
 
 const threshold = computed(() => stats.value.qualityThreshold || 85)
+/**
+ * 有目标文字就能下达。之前按钮绑的是 !title.trim(),而很多人把目标写进了下面那栏「补充背景」,
+ * 按钮看起来还是亮的(样式用 !important 盖掉了禁用态),点下去毫无反应 —— 这是最劝退的一种交互。
+ * 现在:两栏任填其一即可,填错栏也能直接开工(见 create())。
+ */
+const canLaunch = computed(() => !!(form.value.title.trim() || form.value.brief.trim()))
 const loadError = ref('')
 const stale = ref(false)
 const skeletonCount = computed(() => (loading.value && !goals.value.length && !loadError.value) ? 3 : 0)
@@ -287,7 +297,8 @@ const pulseCards = computed(() => [
   { label: '交付物完成', value: `${stats.value.deliverablesDone ?? 0}/${stats.value.deliverables ?? 0}` },
   { label: '成果已通过评审', value: stats.value.artifactsApproved ?? 0, cyan: true },
   { label: '在岗 AI 员工', value: stats.value.activeEmployees ?? 0 },
-  { label: '今日 token', value: fmtTokens(stats.value.tokensToday) }
+  // token 数没法决策,换成钱;今天烧了 60 万 token 花掉 4 块,创始人才有感觉
+  { label: '今日花费', value: money(stats.value.costToday), hint: `今日 ${fmtTokens(stats.value.tokensToday)} token` }
 ])
 
 const statusMap = {
@@ -308,6 +319,12 @@ function fmtTokens(n) {
   n = n || 0
   return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
 }
+/** 金额:小钱也给两位小数,不然「¥0」看起来像没在跑 */
+function money(v) {
+  const n = Number(v || 0)
+  if (n <= 0) return '¥0'
+  return '¥' + (n < 10 ? n.toFixed(2) : n.toFixed(1))
+}
 function fmt(iso) {
   if (!iso) return ''
   return new Date(iso).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' +
@@ -321,7 +338,20 @@ function usePreset(p) {
 }
 
 async function create() {
-  if (!form.value.title.trim() || creating.value) return
+  if (creating.value) return
+  const title = form.value.title.trim()
+  const brief = form.value.brief.trim()
+  if (!title && !brief) {
+    ElMessage({ message: '先写下目标,一句话也行', type: 'warning', plain: true })
+    document.querySelector('.goal-title-input input')?.focus()
+    return
+  }
+  // 只填了「补充背景」:把那一段当目标用,别让人因为填错栏白等
+  if (!title) {
+    const [first, ...rest] = brief.split('\n')
+    form.value.title = first.slice(0, 300)
+    form.value.brief = rest.join('\n').trim()
+  }
   creating.value = true
   try {
     const r = await api.createGoal({ ...form.value, autoStart: true })
@@ -597,14 +627,37 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(var(--rgb-warn), .3); border-radius: 999px; padding: 3px 10px;
 }
 .spacer { flex: 1; }
+/* 两栏都空时唯一要说明的事:按钮不是坏了,是还没写目标 */
+.launch-hint { font-size: 11px; color: var(--text-faint); letter-spacing: .06em; }
 .launch-btn {
   background: linear-gradient(135deg, rgb(var(--rgb-btn-hi)), rgb(var(--rgb-btn))) !important;
   border: 1px solid rgba(var(--rgb-glow), .4) !important;
   color: var(--btn-fg) !important; letter-spacing: .2em; padding: 10px 24px;
   box-shadow: 0 0 24px rgba(var(--rgb-glow), .12);
   transition: all .4s var(--ease-quiet);
+  cursor: pointer;
 }
 .launch-btn:hover { box-shadow: 0 0 32px rgba(var(--rgb-glow), .28); transform: translateY(-1px); }
+/* 待填状态要看得出来:之前用 !important 盖掉了 Element 的禁用样式,
+   按钮看着是亮的、点了没反应,比灰色不可点更糟 */
+.launch-btn.is-idle {
+  opacity: .5;
+  box-shadow: none !important;
+  filter: saturate(.5);
+}
+.launch-btn.is-idle:hover { transform: none; box-shadow: none !important; }
+.field-label {
+  display: block; font-size: 10.5px; letter-spacing: .22em; color: var(--text-faint);
+  margin: 0 0 6px 2px;
+}
+.field-label i {
+  font-style: normal; margin-left: 8px; letter-spacing: .08em;
+  color: var(--glow-cyan-dim); opacity: .8;
+}
+/* 「补充背景」和上面一栏之间留出呼吸,免得两栏看起来像一个输入框 */
+.composer-main .goal-brief-input { margin-top: 16px; }
+.goal-title-input :deep(.el-input__inner) { font-size: 14.5px; letter-spacing: .02em; }
+.pulse-hint { font-size: 10px; color: var(--text-faint); letter-spacing: .06em; margin-top: 2px; }
 .arrow { margin-left: 6px; font-family: var(--font-mono); }
 .advanced { border-top: 1px solid var(--border-hair); margin-top: 14px; padding-top: 16px; display: flex; flex-direction: column; gap: 14px; }
 .adv-field { display: flex; flex-direction: column; gap: 7px; flex: 1; }

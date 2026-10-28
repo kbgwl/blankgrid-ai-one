@@ -111,11 +111,12 @@ public class GoalController {
         return goals.provideFacts(id, body.facts);
     }
 
-    /** 把整个项目写成磁盘上的文件(目录由设置页决定),返回落地路径。 */
+    /** 把整个项目写成磁盘上的文件(目录由设置页决定),返回落地路径。format=all 时四种格式都写。 */
     @PostMapping("/{id}/export-to-dir")
-    public Map<String, Object> exportToDir(@PathVariable Long id) {
+    public Map<String, Object> exportToDir(@PathVariable Long id,
+                                           @RequestParam(required = false) String format) {
         try {
-            return exports.exportGoal(id);
+            return exports.exportGoal(id, format);
         } catch (IOException e) {
             return Map.of("ok", false, "error", "写盘失败:" + e.getMessage());
         }
@@ -138,18 +139,41 @@ public class GoalController {
         return Map.of("ok", true);
     }
 
+    /**
+     * 打包下载:默认 zip(原样的 Markdown 工程包);
+     * ?format=docx|pdf|pptx 则整本项目合成一个文件直接下载。
+     */
     @GetMapping("/{id}/export")
-    public ResponseEntity<byte[]> export(@PathVariable Long id) {
+    public ResponseEntity<byte[]> export(@PathVariable Long id,
+                                         @RequestParam(required = false) String format) {
         Map<String, Object> detail = goals.detail(id);
         Goal g = (Goal) detail.get("goal");
-        byte[] zip = goals.exportZip(id);
-        String name = g.getTitle() == null ? "project" : g.getTitle().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
+        String base = g.getTitle() == null ? "project" : g.getTitle().replaceAll("[\\\\/:*?\"<>|\\s]+", "-");
+        String fmt = format == null ? "" : format.trim().toLowerCase();
+
+        if (fmt.isEmpty() || "zip".equals(fmt)) {
+            byte[] zip = goals.exportZip(id);
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION,
+                            "attachment; filename=\"" + base + ".zip\"; filename*=UTF-8''"
+                                    + java.net.URLEncoder.encode(base + ".zip", StandardCharsets.UTF_8))
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                    .body(zip);
+        }
+
+        String ext = com.blankgrid.aione.service.DocExportService.extension(fmt);
+        byte[] body;
+        try {
+            body = exports.goalBytes(id, ext);
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+        String name = base + "-全书." + ext;
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + name + ".zip\"; filename*=UTF-8''"
-                                + java.net.URLEncoder.encode(name + ".zip", StandardCharsets.UTF_8))
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(zip);
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + "\"; filename*=UTF-8''"
+                        + java.net.URLEncoder.encode(name, StandardCharsets.UTF_8))
+                .contentType(MediaType.parseMediaType(com.blankgrid.aione.service.ExportService.contentType(ext)))
+                .body(body);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

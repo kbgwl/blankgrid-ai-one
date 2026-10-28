@@ -10,8 +10,29 @@
           </div>
           <el-button size="small" text class="dl" @click="toggleEdit">{{ editing ? '取消编辑' : '编辑正文' }}</el-button>
           <el-button v-if="canAdopt" size="small" text class="dl" :loading="adopting" @click="adopt">定为最终版</el-button>
-          <el-button size="small" text class="dl" @click="saveToDir">存到落盘目录</el-button>
-          <el-button size="small" text class="dl" @click="download">下载 Markdown</el-button>
+          <el-dropdown trigger="click" @command="saveToDir">
+            <el-button size="small" text class="dl">存到落盘目录 <i class="caret">▾</i></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="all">全部格式</el-dropdown-item>
+                <el-dropdown-item command="docx" divided>Word</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                <el-dropdown-item command="pptx">PPT</el-dropdown-item>
+                <el-dropdown-item command="md">Markdown</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="download">
+            <el-button size="small" text class="dl">下载 <i class="caret">▾</i></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="md">Markdown</el-dropdown-item>
+                <el-dropdown-item command="docx" divided>Word · .docx</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF · .pdf</el-dropdown-item>
+                <el-dropdown-item command="pptx">PPT · .pptx</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
         <h2 class="art-title">{{ art.title }}</h2>
         <div class="art-meta">
@@ -123,14 +144,16 @@ function fmt(iso) {
   return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
-async function download() {
-  try { await api.downloadArtifact(art.value.id, art.value.title) } catch (e) { ElMessage.error('下载失败') }
+async function download(format) {
+  try {
+    await api.downloadArtifact(art.value.id, art.value.title, format || 'md')
+  } catch (e) { ElMessage.error('下载失败') }
 }
 
-async function saveToDir() {
+async function saveToDir(format) {
   try {
-    const r = await api.exportArtifactToDir(art.value.id)
-    if (r.ok) ElMessage({ message: '已写入 ' + r.file, type: 'success', plain: true, duration: 4600 })
+    const r = await api.exportArtifactToDir(art.value.id, format || 'all')
+    if (r.ok) ElMessage({ message: '已写入 ' + (r.dir || '') + '(' + r.files + ' 个文件)', type: 'success', plain: true, duration: 4600 })
     else ElMessage.error(r.error || '写入失败')
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '写入失败')

@@ -482,3 +482,9 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
     transition-duration: .001ms !important;
   }
 }
+
+/* 下拉导出的那个小三角:全局一处定义,三个页面共用 */
+.caret {
+  font-style: normal; margin-left: 5px; font-size: 9px;
+  opacity: .55; letter-spacing: 0;
+}

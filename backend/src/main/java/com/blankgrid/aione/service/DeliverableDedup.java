@@ -40,6 +40,16 @@ final class DeliverableDedup {
 
     /** 两个标题是不是同一件事。 */
     static boolean same(String a, String b) {
+        if (sameRaw(a, b)) return true;
+        // 剥掉「规格/清单/表/文档」这类尾巴再比一次:
+        // 「品牌视觉设计」与「品牌视觉设计规格」是同一件事,不该各派一次
+        String ca = core(a);
+        String cb = core(b);
+        if (!ca.equals(norm(a)) || !cb.equals(norm(b))) return sameRaw(ca, cb);
+        return false;
+    }
+
+    private static boolean sameRaw(String a, String b) {
         String x = norm(a);
         String y = norm(b);
         if (x.isEmpty() || y.isEmpty()) return false;
@@ -51,6 +61,28 @@ final class DeliverableDedup {
         if (y.contains(x) && x.length() >= CONTAIN_MIN_LEN) return true;
 
         return coverage(x, y) >= COVER_RATIO;
+    }
+
+    /** 附属物尾巴:反复剥到剥不动为止,剩下的才是「产出本体」 */
+    private static final String[] TAILS = {
+            "规格说明", "规格", "规范", "说明书", "说明", "清单", "明细表", "明细",
+            "对照表", "汇总表", "记录表", "检查表", "核算表", "表", "文档", "文件", "初稿", "终稿"
+    };
+
+    static String core(String title) {
+        String s = norm(title);
+        boolean changed = true;
+        while (changed && s.length() > 2) {
+            changed = false;
+            for (String tail : TAILS) {
+                if (s.endsWith(tail) && s.length() - tail.length() >= 2) {
+                    s = s.substring(0, s.length() - tail.length());
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        return s;
     }
 
     /** 较短一方有多少比例的相邻二字组出现在较长一方里。 */

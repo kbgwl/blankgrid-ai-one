@@ -61,9 +61,47 @@ public class SettingsService {
         public String decisionProvider;
         /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
         public String decisionModel;
+        /** 模型单价表(元/百万 token);空 = 用内置参考价。按前缀匹配模型名 */
+        public List<Price> pricing;
+        /** PDF 导出用的中文字体文件;空 = 自动找系统里的微软雅黑/黑体/Noto */
+        public String pdfFontPath = "";
         /** API 返回给前端时隐藏密钥 */
         public transient boolean masked = false;
     }
+
+    /** 一个模型的计价:输入/输出分别多少钱(人民币元 / 百万 token) */
+    public static class Price {
+        /** 模型名前缀,不区分大小写,如 deepseek-flash */
+        public String model = "";
+        public double input = 0;
+        public double output = 0;
+
+        public Price() {}
+        public Price(String model, double input, double output) {
+            this.model = model; this.input = input; this.output = output;
+        }
+    }
+
+    /**
+     * 内置参考价(元 / 百万 token)。只是量级参考,真实账单以服务商为准;
+     * 设置页可以改,改了就按改的算。
+     */
+    static final List<Price> REFERENCE_PRICES = List.of(
+            new Price("deepseek-flash", 0.5, 1.5),
+            new Price("deepseek-chat", 2.0, 8.0),
+            new Price("deepseek-v4", 2.0, 8.0),
+            new Price("deepseek-reasoner", 4.0, 16.0),
+            new Price("deepseek-v4-pro", 4.0, 16.0),
+            new Price("glm-4-flash", 0.0, 0.0),
+            new Price("glm-4", 5.0, 5.0),
+            new Price("gpt-4o-mini", 1.1, 4.3),
+            new Price("gpt-4o", 18.0, 72.0),
+            new Price("qwen-plus", 0.8, 2.0),
+            new Price("qwen-max", 20.0, 60.0)
+    );
+
+    /** 认不出来的模型按这一档估,避免成本列一直是 0 */
+    private static final Price FALLBACK_PRICE = new Price("*", 2.0, 8.0);
 
     public static final String DEFAULT_QUALITY_BAR =
             "交付物必须能直接使用,而不是解释你准备怎么做。要求:结构完整、结论具体、论据/数据/示例可核查、步骤可执行;"
@@ -71,10 +109,12 @@ public class SettingsService {
 
     private final Path file;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SecretBox box;
     private Settings cache;
 
     public SettingsService(@Value("${aione.data-dir:./data}") String dataDir) {
         this.file = Path.of(dataDir, "settings.json");
+        this.box = new SecretBox(Path.of(dataDir));
     }
 
     public synchronized Settings get() {
@@ -115,19 +155,36 @@ public class SettingsService {
         // 决策模型槽位:只在请求真的带了这两个字段时才覆盖(老客户端不传就不会被清空)
         if (incoming.decisionProvider != null) current.decisionProvider = incoming.decisionProvider.trim();
         if (incoming.decisionModel != null) current.decisionModel = incoming.decisionModel.trim();
+        // 单价表与 PDF 字体:同样只在请求真带了的时候覆盖,免得老客户端把它清空
+        if (incoming.pricing != null) current.pricing = incoming.pricing;
+        if (incoming.pdfFontPath != null) current.pdfFontPath = incoming.pdfFontPath.trim();
         // 口令:空或掩码回传则保留原值;__CLEAR__ 表示清除
         if ("__CLEAR__".equals(incoming.password)) {
             current.password = "";
         } else if (incoming.password != null && !incoming.password.isBlank() && !"********".equals(incoming.password)) {
             current.password = incoming.password;
         }
+        persist(current);
+        return current;
+    }
+
+    /**
+     * 落盘。密钥与口令写成密文(AES-GCM),内存里的 cache 仍是明文 ——
+     * 调模型要用真 Key,但磁盘上不该留明文。
+     */
+    private void persist(Settings s) {
+        Settings disk = mapper.convertValue(s, Settings.class);
+        disk.masked = false;
+        if (disk.providers != null) {
+            for (Provider p : disk.providers) p.apiKey = box.encrypt(p.apiKey);
+        }
+        if (disk.password != null) disk.password = box.encrypt(disk.password);
         try {
             Files.createDirectories(file.getParent());
-            mapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), current);
+            mapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), disk);
         } catch (IOException e) {
             throw new RuntimeException("保存设置失败: " + e.getMessage(), e);
         }
-        return current;
     }
 
     public Provider primaryProvider() {
@@ -200,23 +257,87 @@ public class SettingsService {
             kb = merged.toString();
         }
         s.knowledgeBase = kb;
-        try {
-            Files.createDirectories(file.getParent());
-            mapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), s);
-        } catch (IOException e) {
-            throw new RuntimeException("知识库写入失败: " + e.getMessage(), e);
-        }
+        persist(s);
     }
 
     private Settings load() {
-        if (Files.exists(file)) {
-            try {
-                return mapper.readValue(file.toFile(), Settings.class);
-            } catch (IOException e) {
-                throw new RuntimeException("读取设置失败: " + e.getMessage(), e);
+        if (!Files.exists(file)) return new Settings();
+        Settings s;
+        try {
+            s = mapper.readValue(file.toFile(), Settings.class);
+        } catch (IOException e) {
+            throw new RuntimeException("读取设置失败: " + e.getMessage(), e);
+        }
+        // 老版本明文密钥:照常解出真身,顺手把文件改成密文,不需要人工迁移
+        boolean plainFound = false;
+        if (s.providers != null) {
+            for (Provider p : s.providers) {
+                if (p.apiKey == null || p.apiKey.isEmpty()) continue;
+                if (!box.isEncrypted(p.apiKey)) plainFound = true;
+                p.apiKey = box.decrypt(p.apiKey);
             }
         }
-        return new Settings();
+        if (s.password != null && !s.password.isEmpty()) {
+            if (!box.isEncrypted(s.password)) plainFound = true;
+            s.password = box.decrypt(s.password);
+        }
+        if (plainFound) {
+            try {
+                persist(s);
+            } catch (RuntimeException ignored) {
+                // 迁移失败不影响启动,下次保存还会再试一次
+            }
+        }
+        return s;
+    }
+
+    // ==================== 计价 ====================
+
+    /** 某个模型的单价:用户配置优先(前缀匹配),其次内置参考价,最后兜底。 */
+    public Price priceOf(String model) {
+        String m = model == null ? "" : model.trim().toLowerCase(java.util.Locale.ROOT);
+        List<Price> userPriced = get().pricing;
+        if (userPriced != null) {
+            for (Price p : userPriced) {
+                if (p != null && p.model != null && !p.model.isBlank() && m.startsWith(p.model.trim().toLowerCase(java.util.Locale.ROOT))) {
+                    return p;
+                }
+            }
+        }
+        for (Price p : REFERENCE_PRICES) {
+            if (m.startsWith(p.model)) return p;
+        }
+        return FALLBACK_PRICE;
+    }
+
+    /**
+     * 估算花费(元)。token 账本只记总量、不区分输入输出,
+     * 这里按「输入:输出 = 3:1」的常见比例折算,数量级够用,不做伪精确。
+     */
+    public double costOf(long tokens, String model) {
+        if (tokens <= 0) return 0;
+        Price p = priceOf(model);
+        double in = tokens * 0.75 / 1_000_000.0 * p.input;
+        double out = tokens * 0.25 / 1_000_000.0 * p.output;
+        return in + out;
+    }
+
+    /** 执行岗位默认用哪个模型名(成本折算时当缺省值) */
+    public String defaultModel() {
+        Provider p = primaryProvider();
+        return p == null ? "" : (p.model == null ? "" : p.model);
+    }
+
+    /** 当前单价表(内置 + 用户覆盖),给设置页和前端展示 */
+    public List<Price> effectivePrices() {
+        List<Price> out = new ArrayList<>();
+        List<Price> userPriced = get().pricing;
+        if (userPriced != null) out.addAll(userPriced);
+        for (Price p : REFERENCE_PRICES) {
+            boolean overridden = out.stream().anyMatch(u -> u != null && u.model != null && u.model.equalsIgnoreCase(p.model));
+            if (!overridden) out.add(p);
+        }
+        return out;
     }
 
     /** 返回给前端的副本,密钥掩码 */

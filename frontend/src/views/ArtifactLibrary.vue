@@ -113,8 +113,29 @@
             <footer class="rd-foot">
               <button class="rd-btn" @click="toggleEdit">{{ editing ? '取消编辑' : '✎ 编辑正文' }}</button>
               <button v-if="active.status !== 'APPROVED'" class="rd-btn" @click="adoptActive">✓ 定为最终版</button>
-              <button class="rd-btn" @click="download(active)">↓ 下载 Markdown</button>
-              <button class="rd-btn" @click="saveToDir(active)">⇥ 存到落盘目录</button>
+              <el-dropdown trigger="click" @command="(f) => download(active, f)">
+                <button class="rd-btn">↓ 下载 <i class="caret">▾</i></button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="md">Markdown</el-dropdown-item>
+                    <el-dropdown-item command="docx" divided>Word · .docx</el-dropdown-item>
+                    <el-dropdown-item command="pdf">PDF · .pdf</el-dropdown-item>
+                    <el-dropdown-item command="pptx">PPT · .pptx</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-dropdown trigger="click" @command="(f) => saveToDir(active, f)">
+                <button class="rd-btn">⇥ 存到落盘目录 <i class="caret">▾</i></button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="all">全部格式</el-dropdown-item>
+                    <el-dropdown-item command="docx" divided>只要 Word</el-dropdown-item>
+                    <el-dropdown-item command="pdf">只要 PDF</el-dropdown-item>
+                    <el-dropdown-item command="pptx">只要 PPT</el-dropdown-item>
+                    <el-dropdown-item command="md">只要 Markdown</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <button class="rd-btn quiet" @click="copyLink(active)">复制链接</button>
               <router-link v-if="active.goalId" class="rd-btn quiet" :to="'/goals/' + active.goalId">查看来源项目</router-link>
             </footer>
@@ -337,15 +358,15 @@ async function copyLink(a) {
   }
 }
 
-async function download(a) {
-  try { await api.downloadArtifact(a.id, a.title) } catch (e) { ElMessage.error('下载失败') }
+async function download(a, format) {
+  try { await api.downloadArtifact(a.id, a.title, format || 'md') } catch (e) { ElMessage.error('下载失败') }
 }
 
 /* 落盘和下载是两件事:下载是把文件交给你,落盘是让它待在你能找到的目录里 */
-async function saveToDir(a) {
+async function saveToDir(a, format) {
   try {
-    const r = await api.exportArtifactToDir(a.id)
-    if (r.ok) ElMessage({ message: '已写入 ' + r.file, type: 'success', plain: true, duration: 4600 })
+    const r = await api.exportArtifactToDir(a.id, format || 'all')
+    if (r.ok) ElMessage({ message: '已写入 ' + (r.dir || '') + '(' + r.files + ' 个文件)', type: 'success', plain: true, duration: 4600 })
     else ElMessage.error(r.error || '写入失败')
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '写入失败')

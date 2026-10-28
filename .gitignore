@@ -13,6 +13,9 @@ exports/
 *.lock.db
 *.trace.db
 settings.json
+# settings.json 的加密主密钥:和密文放一起只是为了「文件被单独拷走时没用」,绝不能进仓库
+.secret.key
+.env
 
 # 本地工具链(JDK / Node / Maven 数百 MB)与验证截图、会话草稿
 tools/

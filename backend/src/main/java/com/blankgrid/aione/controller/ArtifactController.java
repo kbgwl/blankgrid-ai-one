@@ -74,9 +74,10 @@ public class ArtifactController {
 
     /** 单份成果直接写进设置页指定的落盘目录,不再走浏览器下载。 */
     @PostMapping("/{id}/export-to-dir")
-    public Map<String, Object> exportToDir(@PathVariable Long id) {
+    public Map<String, Object> exportToDir(@PathVariable Long id,
+                                           @RequestParam(required = false) String format) {
         try {
-            return exports.exportArtifact(id);
+            return exports.exportArtifact(id, format);
         } catch (IOException e) {
             return Map.of("ok", false, "error", "写盘失败:" + e.getMessage());
         }
@@ -103,23 +104,27 @@ public class ArtifactController {
         return m;
     }
 
+    /**
+     * 下载单份成果:默认 Markdown,?format=docx|pptx|pdf 直接出成品文件。
+     * 浏览器点一下就拿到能发给人的文档,不用先装 Office。
+     */
     @GetMapping("/{id}/download")
-    public ResponseEntity<byte[]> download(@PathVariable Long id) {        Artifact a = goals.artifact(id);
+    public ResponseEntity<byte[]> download(@PathVariable Long id,
+                                           @RequestParam(required = false) String format) {
+        Artifact a = goals.artifact(id);
         String title = nz(a.getTitle()).isBlank() ? "artifact" : a.getTitle();
-        StringBuilder sb = new StringBuilder();
-        sb.append("# ").append(title).append("\n\n");
-        sb.append("> 版本 v").append(a.getVersion()).append(" · 评分 ").append(a.getScore())
-          .append(" · ").append(a.getStatus()).append("\n\n");
-        if (a.getReviewNotes() != null && !a.getReviewNotes().isBlank()) {
-            sb.append("## 评审意见\n\n").append(a.getReviewNotes()).append("\n\n");
+        String ext = com.blankgrid.aione.service.DocExportService.extension(format);
+        byte[] body;
+        try {
+            body = exports.artifactBytes(id, ext);
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
         }
-        sb.append("---\n\n").append(nz(a.getContent()));
-        byte[] body = sb.toString().getBytes(StandardCharsets.UTF_8);
-        String name = title.replaceAll("[\\\\/:*?\"<>|\\s]+", "-") + "-v" + a.getVersion() + ".md";
+        String name = title.replaceAll("[\\\\/:*?\"<>|\\s]+", "-") + "-v" + a.getVersion() + "." + ext;
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + "\"; filename*=UTF-8''"
                         + java.net.URLEncoder.encode(name, StandardCharsets.UTF_8))
-                .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
+                .contentType(MediaType.parseMediaType(com.blankgrid.aione.service.ExportService.contentType(ext)))
                 .body(body);
     }
 

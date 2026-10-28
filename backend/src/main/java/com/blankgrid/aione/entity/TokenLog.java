@@ -25,6 +25,9 @@ public class TokenLog {
     /** 估算 token 数 */
     private long tokens;
 
+    /** 这次调用用的模型名;老数据为空,折算成本时按当前主用模型算 */
+    private String model;
+
     private Instant createdAt = Instant.now();
 
     public TokenLog() {}
@@ -34,10 +37,15 @@ public class TokenLog {
     }
 
     public TokenLog(Long taskId, Long goalId, String source, long tokens) {
+        this(taskId, goalId, source, tokens, null);
+    }
+
+    public TokenLog(Long taskId, Long goalId, String source, long tokens, String model) {
         this.taskId = taskId;
         this.goalId = goalId;
         this.source = source;
         this.tokens = tokens;
+        this.model = model;
     }
 
     public Long getId() { return id; }
@@ -45,5 +53,8 @@ public class TokenLog {
     public Long getGoalId() { return goalId; }
     public String getSource() { return source; }
     public long getTokens() { return tokens; }
+    public String getModel() { return model; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void setModel(String model) { this.model = model; }
 }

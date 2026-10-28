@@ -38,8 +38,29 @@
           <el-button v-if="canResume" size="small" type="primary" plain :loading="acting" @click="doAction('resume')">恢复</el-button>
           <el-button v-if="canAccept" size="small" class="accept-btn" :loading="acting" @click="accept">复核归档</el-button>
           <el-button v-if="canReplan" size="small" plain :loading="acting" @click="doAction('replan')">重新拆解</el-button>
-          <el-button size="small" text class="export-btn" @click="exportZip">下载 zip</el-button>
-          <el-button size="small" text class="export-btn" :loading="dirExporting" @click="exportToDir">存到目录</el-button>
+          <el-dropdown trigger="click" @command="exportAs">
+            <el-button size="small" text class="export-btn">导出 <i class="caret">▾</i></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="zip">zip 工程包(Markdown 原样)</el-dropdown-item>
+                <el-dropdown-item command="docx" divided>Word 全书 · .docx</el-dropdown-item>
+                <el-dropdown-item command="pdf">PDF 全书 · .pdf</el-dropdown-item>
+                <el-dropdown-item command="pptx">PPT 汇报 · .pptx</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown trigger="click" @command="exportToDir">
+            <el-button size="small" text class="export-btn" :loading="dirExporting">存到目录 <i class="caret">▾</i></el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="all">全部格式(Markdown + Word + PDF + PPT)</el-dropdown-item>
+                <el-dropdown-item command="docx" divided>只要 Word</el-dropdown-item>
+                <el-dropdown-item command="pdf">只要 PDF</el-dropdown-item>
+                <el-dropdown-item command="pptx">只要 PPT</el-dropdown-item>
+                <el-dropdown-item command="md">只要 Markdown</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </header>
@@ -587,19 +608,20 @@ async function retryWorkstream(ws) {
   } catch (e) { ElMessage.error(e.response?.data?.error || '重试失败') } finally { acting.value = false }
 }
 
-async function exportZip() {
+async function exportAs(format) {
   try {
-    await api.downloadGoal(goal.value.id, goal.value.title)
+    await api.downloadGoal(goal.value.id, goal.value.title, format === 'zip' ? null : format)
+    if (format !== 'zip') ElMessage({ message: '正在生成 ' + format.toUpperCase() + ',稍等', type: 'info', plain: true })
   } catch (e) { ElMessage.error('导出失败') }
 }
 
 const dirExporting = ref(false)
-async function exportToDir() {
+async function exportToDir(format) {
   dirExporting.value = true
   try {
-    const r = await api.exportGoalToDir(goal.value.id)
+    const r = await api.exportGoalToDir(goal.value.id, format || 'all')
     if (r.ok) {
-      ElMessage({ message: '已写入 ' + r.dir + '(' + r.files + ' 个文件)', type: 'success', plain: true, duration: 4200 })
+      ElMessage({ message: '已写入 ' + r.dir + '(' + r.files + ' 个文件)', type: 'success', plain: true, duration: 4600 })
     } else {
       ElMessage.error(r.error || '写入失败')
     }
