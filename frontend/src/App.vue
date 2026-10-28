@@ -1,0 +1,309 @@
+<template>
+  <div class="shell">
+    <div class="ink-canvas"></div>
+    <!-- 特效层:极光漂移 + 流星 -->
+    <div class="fx-layer">
+      <div class="aurora aurora-a"></div>
+      <div class="aurora aurora-b"></div>
+      <span class="meteor m1"></span>
+      <span class="meteor m2"></span>
+      <span class="meteor m3"></span>
+    </div>
+    <header class="topbar glass">
+      <div class="brand" @click="$router.push('/')">
+        <div class="logo-wrap">
+          <svg class="logo" viewBox="0 0 32 32" width="26" height="26">
+            <rect x="4" y="4" width="24" height="24" rx="7" fill="none"
+                  stroke="var(--glow-cyan)" stroke-width="1.6" opacity=".9" />
+            <circle cx="16" cy="16" r="2.6" fill="var(--glow-cyan)">
+              <animate attributeName="opacity" values=".45;1;.45" dur="3.2s"
+                       repeatCount="indefinite" calcMode="spline"
+                       keySplines=".4 0 .2 1;.4 0 .2 1" />
+            </circle>
+          </svg>
+          <span class="logo-ring"></span>
+        </div>
+        <span class="brand-name">空白格</span>
+        <span class="brand-en">BLANKGRID</span>
+      </div>
+      <nav class="nav">
+        <router-link to="/" class="nav-link" active-class="" exact-active-class="router-link-active">目标</router-link>
+        <router-link to="/org" class="nav-link">组织</router-link>
+        <router-link to="/board" class="nav-link">看板</router-link>
+        <router-link to="/artifacts" class="nav-link">成果</router-link>
+        <router-link to="/settings" class="nav-link">设置</router-link>
+      </nav>
+      <button class="play-btn" :class="{ busy: rpBusy }" :disabled="!replayReady"
+              :title="replayTitle" @click="toggleReplay">
+        <i>{{ rpBusy ? '■' : '▶' }}</i>{{ rpBusy ? rpLabel : '播放施工过程' }}
+      </button>
+      <div class="theme-switch" aria-label="主题">
+        <button :class="{ on: theme === 'ink' }" @click="setTheme('ink')">墨夜</button>
+        <button :class="{ on: theme === 'paper' }" @click="setTheme('paper')">宣纸</button>
+      </div>
+      <div class="corp">
+        <span class="live-dot" :class="running > 0 ? 'is-run' : 'is-on'"></span>
+        <span v-if="running > 0">施工中 <b>{{ running }}</b> 项</span>
+        <span v-else>系统在线</span>
+        <i class="sep"></i>
+        <span>{{ activeEmployees }} 人在岗</span>
+        <i class="sep"></i>
+        <span class="clock">{{ clock }}</span>
+      </div>
+    </header>
+    <main class="main">
+      <router-view v-slot="{ Component }">
+        <transition name="rv" mode="out-in">
+          <component :is="Component" :key="$route.fullPath" />
+        </transition>
+      </router-view>
+    </main>
+
+    <!-- 口令登录 -->
+    <el-dialog v-model="authOpen" title="空白格 · 访问验证" width="360px" :close-on-click-modal="false">
+      <el-input v-model="password" type="password" placeholder="请输入访问口令" show-password
+                @keyup.enter="doLogin" />
+      <p class="auth-hint" v-if="authError">{{ authError }}</p>
+      <template #footer>
+        <el-button type="primary" :loading="authLoading" @click="doLogin">进入</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
+import { connectWs, bus, login, api, authToken } from './api'
+import { motionOk } from './utils/motion'
+
+const route = useRoute()
+
+const authOpen = ref(false)
+const password = ref('')
+const authError = ref('')
+const authLoading = ref(false)
+const running = ref(0)
+const activeEmployees = ref(0)
+const clock = ref('')
+const theme = ref(document.documentElement.dataset.theme === 'paper' ? 'paper' : 'ink')
+const rpBusy = ref(false)
+const rpLabel = ref('')
+const replayReady = computed(() => /^\/goals\/[^/]+/.test(route.path) && motionOk())
+const replayTitle = computed(() => {
+  if (!/^\/goals\/[^/]+/.test(route.path)) return '进入项目详情页后可重放这条目标的施工过程'
+  if (!motionOk()) return '已按系统偏好关闭动效(减少动态效果)'
+  return '重放目标从拆解到归档的全过程,哪一步在亮就是当时卡在哪'
+})
+function toggleReplay() {
+  if (!replayReady.value) return
+  bus.emit({ type: 'ui-replay-toggle' })
+}
+// 离开项目详情页时按钮不该继续显示「施工中」
+watch(() => route.path, p => {
+  if (!/^\/goals\/[^/]+/.test(p)) { rpBusy.value = false; rpLabel.value = '' }
+})
+function setTheme(t) {
+  theme.value = t
+  document.documentElement.dataset.theme = t
+  try { localStorage.setItem('bg-theme', t) } catch (e) { /* 隐私模式下只是记不住,不该拦人 */ }
+}
+let offAuth = null
+let offStatus = null
+let clockTimer = null
+let statsTimer = null
+
+async function loadTopStats() {
+  try {
+    const s = await api.stats()
+    running.value = s.running || 0
+    activeEmployees.value = s.activeEmployees || s.totalEmployees || 0
+  } catch (e) { /* 口令未过时静默,登录框会负责提醒 */ }
+}
+function tickClock() {
+  const d = new Date()
+  clock.value = [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2, '0')).join(':')
+}
+
+onMounted(async () => {
+  connectWs()
+  offAuth = bus.on(evt => {
+    if (evt.type === 'auth-required') { authOpen.value = true; password.value = '' }
+    if (evt.type === 'ui-replay-state') { rpBusy.value = !!evt.busy; rpLabel.value = evt.label || '' }
+  })
+  offStatus = bus.on(evt => {
+    if (['task-update', 'goal-update', 'goal-completed', 'employee-status', 'ceo-cycle'].includes(evt.type)) {
+      clearTimeout(statsTimer)
+      statsTimer = setTimeout(loadTopStats, 420)
+    }
+  })
+  tickClock()
+  clockTimer = setInterval(tickClock, 1000)
+  loadTopStats()
+  // 探测是否需要登录
+  try { await api.opsFeed() } catch (e) { /* 401 由拦截器弹窗 */ }
+})
+onBeforeUnmount(() => {
+  offAuth && offAuth()
+  offStatus && offStatus()
+  clearInterval(clockTimer)
+  clearTimeout(statsTimer)
+})
+
+async function doLogin() {
+  if (!password.value) return
+  authLoading.value = true
+  authError.value = ''
+  try {
+    await login(password.value)
+    authOpen.value = false
+    location.reload()
+  } catch (e) {
+    authError.value = e.response?.data?.message || '口令不对'
+  } finally { authLoading.value = false }
+}
+</script>
+
+<style scoped>
+.shell { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ===== 特效层:极光 + 流星 ===== */
+.fx-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.aurora {
+  position: absolute; width: 720px; height: 720px; border-radius: 50%;
+  filter: blur(90px); opacity: calc(.5 * var(--fx-a)); will-change: transform;
+}
+.aurora-a {
+  left: -200px; top: -260px;
+  background: radial-gradient(circle, rgba(var(--rgb-glow), .16), transparent 65%);
+  animation: driftA 46s ease-in-out infinite alternate;
+}
+.aurora-b {
+  right: -240px; bottom: -300px;
+  background: radial-gradient(circle, rgba(var(--rgb-plan), .13), transparent 65%);
+  animation: driftB 58s ease-in-out infinite alternate;
+}
+@keyframes driftA {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(340px, 180px) scale(1.25); }
+}
+@keyframes driftB {
+  0% { transform: translate(0, 0) scale(1.1); }
+  100% { transform: translate(-300px, -160px) scale(.9); }
+}
+.meteor {
+  position: absolute; width: 150px; height: 1.5px; border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(var(--rgb-glow), var(--meteor-a)), transparent);
+  opacity: 0; transform: rotate(-24deg); will-change: transform, opacity;
+}
+.m1 { top: 14%; left: 8%; animation: shoot 9s ease-in 3s infinite; }
+.m2 { top: 30%; left: 55%; animation: shoot 12s ease-in 6.5s infinite; }
+.m3 { top: 8%;  left: 70%; animation: shoot 15s ease-in 1.8s infinite; }
+@keyframes shoot {
+  0% { opacity: 0; transform: rotate(-24deg) translateX(-60px); }
+  4% { opacity: .9; }
+  14% { opacity: 0; transform: rotate(-24deg) translateX(560px); }
+  100% { opacity: 0; transform: rotate(-24deg) translateX(560px); }
+}
+
+/* ===== 品牌 Logo 呼吸光环 ===== */
+.logo-wrap { position: relative; display: grid; place-items: center; }
+.logo { position: relative; z-index: 1; }
+.logo-ring {
+  position: absolute; width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid rgba(var(--rgb-glow), .35);
+  animation: ringPulse 3.2s var(--ease-quiet) infinite;
+}
+@keyframes ringPulse {
+  0%, 100% { transform: scale(.85); opacity: .25; }
+  50% { transform: scale(1.18); opacity: .8; }
+}
+
+.topbar {
+  position: sticky; top: 14px; z-index: 20;
+  margin: 14px 26px 0; padding: 13px 24px;
+  display: flex; align-items: center; gap: 40px;
+}
+.brand { display: flex; align-items: center; gap: 13px; cursor: pointer; flex: none; white-space: nowrap; }
+.brand-name { font-size: 19px; font-weight: 300; letter-spacing: .42em; margin-left: .1em; white-space: nowrap; }
+.brand-en { font-size: 10px; letter-spacing: .34em; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap; }
+.nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.nav-link {
+  position: relative; white-space: nowrap;
+  color: var(--text-dim); text-decoration: none; font-size: 14px;
+  letter-spacing: .2em; padding: 7px 18px; border-radius: 9px;
+  transition: all .4s var(--ease-quiet);
+}
+.nav-link::after {
+  content: ""; position: absolute; left: 50%; bottom: 2px; width: 0; height: 2px;
+  border-radius: 2px; background: var(--glow-cyan);
+  transform: translateX(-50%); transition: width .4s var(--ease-out);
+  box-shadow: 0 0 8px rgba(var(--rgb-glow), .6);
+}
+.nav-link:hover { color: var(--text-moon); }
+.nav-link.router-link-active {
+  color: var(--glow-cyan);
+  background: var(--glow-cyan-faint);
+  text-shadow: 0 0 14px rgba(var(--rgb-glow), .35);
+}
+.nav-link.router-link-active::after { width: 26px; }
+.corp {
+  margin-left: 18px; display: flex; align-items: center; gap: 9px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--text-faint);
+}
+.play-btn {
+  appearance: none; cursor: pointer; flex: none; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+  color: var(--glow-cyan); background: var(--glow-cyan-faint);
+  border: 1px solid rgba(var(--rgb-glow), .32); border-radius: 999px; padding: 6px 14px;
+  transition: color .3s var(--ease-quiet), background .3s var(--ease-quiet),
+              border-color .3s var(--ease-quiet), box-shadow .3s var(--ease-quiet);
+}
+.play-btn i { font-style: normal; font-size: 8px; transform: translateY(-.5px) }
+.play-btn:hover:not(:disabled) {
+  border-color: rgba(var(--rgb-glow), .62); box-shadow: 0 0 18px rgba(var(--rgb-glow), .26);
+}
+.play-btn.busy {
+  color: var(--st-warn); background: rgba(var(--rgb-warn), .07);
+  border-color: rgba(var(--rgb-warn), .38); animation: playBusy 2.1s var(--ease-quiet) infinite;
+}
+.play-btn:disabled {
+  color: var(--text-faint); background: transparent;
+  border-color: var(--border-hair); cursor: not-allowed;
+}
+@keyframes playBusy { 0%, 100% { opacity: 1 } 50% { opacity: .68 } }
+.theme-switch {  display: flex; gap: 2px; padding: 3px; flex: none; margin-left: auto;
+  border: 1px solid var(--border-hair); border-radius: 999px; background: var(--tint-soft);
+}
+.theme-switch button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em;
+  color: var(--text-faint); padding: 4px 12px; border-radius: 999px;
+  transition: color .3s var(--ease-quiet), background .3s var(--ease-quiet);
+}
+.theme-switch button:hover { color: var(--text-dim); }
+.theme-switch button.on { color: var(--glow-cyan); background: var(--glow-cyan-faint); }
+.corp b { font-weight: 400; color: var(--warm); }
+.corp .sep { width: 1px; height: 10px; background: var(--border-hair-strong); }
+.corp .clock { font-variant-numeric: tabular-nums; }
+.live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint); flex: none; }
+.live-dot.is-on { background: var(--glow-cyan); box-shadow: 0 0 9px rgba(var(--rgb-glow), .5); }
+.live-dot.is-run { background: var(--warm); box-shadow: 0 0 9px rgba(var(--rgb-warm), .5); animation: pulseDot 2.2s var(--ease-quiet) infinite; }
+@keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .32; } }
+.main { flex: 1; padding: 22px 26px 34px; position: relative; z-index: 1; }
+.auth-hint { color: var(--st-error); font-size: 12px; margin: 10px 0 0; }
+@media (max-width: 1100px) {
+  .brand-en { display: none; }
+  .topbar { gap: 20px; }
+}
+@media (max-width: 760px) {
+  .topbar { gap: 12px; padding: 10px 14px; margin: 10px 12px 0; flex-wrap: wrap; }
+  .brand-name { font-size: 16px; letter-spacing: .2em; }
+  .nav { gap: 2px; }
+  .nav-link { padding: 6px 10px; letter-spacing: .1em; font-size: 13px; }
+  .main { padding: 16px 12px 28px; }
+}
+@media (max-width: 900px) { .corp { display: none; } }
+</style>

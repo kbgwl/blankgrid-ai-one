@@ -1,0 +1,2636 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="ink">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>空白格 · 全站视觉稿 2026.10</title>
+<style>
+/* =========================================================
+   空白格 · 全站视觉稿
+   两套主题：墨夜·天青 / 宣纸·朱砂
+   纯静态，无外部字体与依赖
+   ========================================================= */
+:root{
+  --font-serif:"Noto Serif SC","Source Han Serif SC","STZhongsong","STSong","SimSun",serif;
+  --font-sans:"HarmonyOS Sans","MiSans","Source Han Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+  --r-lg:18px;--r-md:14px;--r-sm:10px;
+  --bar-bg:rgba(5,7,10,.78);
+}
+:root,:root[data-theme="ink"]{
+  --bg:#05070a;--bg-2:#070a0f;
+  --surface:#0b1018;--surface-2:#101722;--surface-3:#151e2b;
+  --text:#f1f0e8;--text-dim:rgba(241,240,232,.62);--text-faint:rgba(241,240,232,.34);
+  --line:rgba(241,240,232,.09);--line-strong:rgba(241,240,232,.18);
+  --accent:#8ce7d9;--accent-dim:rgba(140,231,217,.6);--accent-faint:rgba(140,231,217,.09);
+  --accent-glow:rgba(140,231,217,.3);
+  --warm:#e6d3af;--warm-faint:rgba(230,211,175,.06);--brick:#d1806b;
+  --ok:#8ce7d9;--warn:#e6c79a;--err:#e09a9a;
+  --card:linear-gradient(165deg,rgba(17,24,34,.94),rgba(8,12,18,.96));
+  --card-flat:#0b111a;
+  --shadow:0 26px 70px rgba(0,0,0,.5);--shadow-soft:0 12px 30px rgba(0,0,0,.3);
+  --grid-line:rgba(241,240,232,.024);
+  --btn-bg:#8ce7d9;--btn-fg:#04231f;
+  --dept-product:#c5b3ef;--dept-tech:#97c6ec;--dept-design:#eebccf;--dept-market:#eecaa0;--dept-ops:#b3d9b5;
+  --sel:rgba(140,231,217,.07);
+  --bar-bg:rgba(5,7,10,.78);
+}
+:root[data-theme="paper"]{
+  --bg:#e9e2d3;--bg-2:#e2dac8;
+  --surface:#faf6ec;--surface-2:#f3ecdd;--surface-3:#ece4d2;
+  --text:#1c1b17;--text-dim:rgba(28,27,23,.66);--text-faint:rgba(28,27,23,.42);
+  --line:rgba(28,27,23,.13);--line-strong:rgba(28,27,23,.26);
+  --accent:#a5462f;--accent-dim:rgba(165,70,47,.7);--accent-faint:rgba(165,70,47,.075);
+  --accent-glow:rgba(165,70,47,.2);
+  --warm:#8a6a3f;--warm-faint:rgba(138,106,63,.07);--brick:#a5462f;
+  --ok:#2f6f64;--warn:#9a6b2f;--err:#a5462f;
+  --card:linear-gradient(165deg,#fdfaf2,#f7f1e4);
+  --card-flat:#fbf7ee;
+  --shadow:0 26px 70px rgba(70,55,32,.15);--shadow-soft:0 10px 26px rgba(70,55,32,.08);
+  --grid-line:rgba(28,27,23,.035);
+  --btn-bg:#a5462f;--btn-fg:#fdf8ee;
+  --dept-product:#6b5397;--dept-tech:#2f6389;--dept-design:#a34f6c;--dept-market:#94602a;--dept-ops:#3f6b40;
+  --sel:rgba(165,70,47,.06);
+  --bar-bg:rgba(233,226,211,.82);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:var(--font-sans);font-weight:300;font-size:14px;
+  -webkit-font-smoothing:antialiased;
+  transition:background .45s ease,color .45s ease;
+}
+button{font-family:inherit}
+::selection{background:var(--accent-glow);color:var(--text)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+a{color:inherit}
+
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.serif{font-family:var(--font-serif)}
+.eyebrow{
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.28em;
+  text-transform:uppercase;color:var(--accent);opacity:.9;
+}
+
+/* ================= deck shell ================= */
+.deckbar{
+  position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:22px;
+  padding:11px 24px;background:var(--bar-bg);
+  backdrop-filter:blur(20px) saturate(1.25);-webkit-backdrop-filter:blur(20px) saturate(1.25);
+  border-bottom:1px solid var(--line);
+}
+.db-brand{display:flex;align-items:center;gap:11px;flex:none}
+.db-tabs{display:flex;align-items:center;gap:1px;overflow-x:auto;flex:1;scrollbar-width:none}
+.db-tabs::-webkit-scrollbar{display:none}
+.db-tabs button{
+  flex:none;appearance:none;border:0;background:transparent;color:var(--text-dim);
+  font-size:12.5px;letter-spacing:.14em;padding:8px 13px;border-radius:8px;cursor:pointer;
+  transition:color .3s,background .3s;white-space:nowrap;position:relative;
+}
+.db-tabs button:hover{color:var(--text);background:var(--accent-faint)}
+.db-tabs button.on{color:var(--accent);background:var(--accent-faint)}
+.db-tabs button.on::after{
+  content:"";position:absolute;left:13px;right:13px;bottom:3px;height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+}
+.db-tabs button.ghost{color:var(--text-faint);font-size:11px;letter-spacing:.16em}
+.db-tabs button.ghost:hover{color:var(--text-dim)}
+.db-sep{width:1px;height:16px;background:var(--line-strong);margin:0 8px;flex:none}
+.db-live{
+  display:flex;align-items:center;gap:9px;flex:none;
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;color:var(--text-faint);
+  white-space:nowrap;
+}
+.db-live b{color:var(--warn);font-weight:400}
+.db-live .sep{width:1px;height:10px;background:var(--line-strong)}
+.theme-toggle{
+  display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;
+  background:var(--surface);flex:none;
+}
+.theme-toggle button{
+  border:0;background:transparent;color:var(--text-faint);font-size:10.5px;
+  letter-spacing:.1em;padding:5px 11px;border-radius:999px;cursor:pointer;transition:.3s;
+}
+.theme-toggle button:hover{color:var(--text-dim)}
+.theme-toggle button.on{background:var(--accent-faint);color:var(--accent)}
+.deck-main{max-width:1400px;margin:0 auto;padding:22px 26px 56px}
+.page-hint{
+  display:flex;justify-content:space-between;gap:16px;margin:0 2px 12px;
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.16em;color:var(--text-faint);
+}
+.page-hint b{font-weight:400;color:var(--text-dim)}
+.tab-panel{display:none}
+.tab-panel.on{display:block;animation:fadeUp .45s cubic-bezier(.22,1,.36,1) both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* ================= app frame ================= */
+.app{
+  position:relative;border-radius:20px;border:1px solid var(--line);
+  overflow:hidden;background:var(--bg);box-shadow:var(--shadow);
+  transition:background .45s,border-color .45s;
+}
+.app-bg{
+  position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 52% 32% at 50% -8%,var(--accent-faint),transparent 62%),
+    radial-gradient(ellipse 42% 30% at 94% 104%,var(--warm-faint),transparent 62%),
+    var(--bg);
+}
+.app-bg::before{
+  content:"";position:absolute;inset:0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid-line) 1px,transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 90% 82% at 50% 32%,#000 22%,transparent 100%);
+  mask-image:radial-gradient(ellipse 90% 82% at 50% 32%,#000 22%,transparent 100%);
+}
+[data-theme="paper"] .app-bg::after{
+  content:"";position:absolute;inset:0;
+  background:
+    linear-gradient(180deg,rgba(255,252,244,.42),transparent 26%),
+    radial-gradient(ellipse 80% 60% at 50% 120%,rgba(120,96,58,.08),transparent 70%);
+  mix-blend-mode:multiply;
+}
+.mark{
+  width:22px;height:22px;border:1.5px solid var(--accent-dim);border-radius:7px;
+  display:grid;place-items:center;flex:none;
+}
+.mark i{width:4px;height:4px;border-radius:50%;background:var(--accent);box-shadow:0 0 9px var(--accent-glow)}
+.an{font-size:16px;letter-spacing:.38em;margin-left:.38em;white-space:nowrap}
+.ae{font-family:var(--font-mono);font-size:8.5px;letter-spacing:.28em;color:var(--text-faint);white-space:nowrap}
+.appbody{position:relative;z-index:1;padding:28px 30px 42px}
+
+/* ================= primitives ================= */
+.dot{width:5px;height:5px;border-radius:50%;display:inline-block;background:var(--text-faint);flex:none}
+.dot.on{background:var(--ok);box-shadow:0 0 8px color-mix(in srgb,var(--ok) 45%,transparent)}
+.dot.run{background:var(--warn);box-shadow:0 0 8px rgba(230,199,154,.35);animation:pulse 2.2s ease-in-out infinite}
+.dot.err{background:var(--err);box-shadow:0 0 8px rgba(224,154,154,.35)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:8px 15px;border-radius:9px;border:1px solid var(--line-strong);
+  background:transparent;color:var(--text-dim);font-size:12px;letter-spacing:.08em;
+  cursor:pointer;transition:.3s;white-space:nowrap;
+}
+.btn:hover{color:var(--text);border-color:var(--accent-dim)}
+.btn.primary{background:var(--btn-bg);border-color:var(--btn-bg);color:var(--btn-fg);font-weight:400}
+.btn.primary:hover{filter:brightness(1.06);box-shadow:0 0 22px var(--accent-glow)}
+.btn.sm{padding:5px 10px;font-size:11px;border-radius:7px}
+.btn.quiet{border-color:transparent;color:var(--text-faint);padding:6px 9px}
+.btn.quiet:hover{color:var(--accent);background:var(--accent-faint)}
+
+.badge{
+  display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:10px;letter-spacing:.06em;border:1px solid var(--line);color:var(--text-dim);
+  background:var(--surface-2);white-space:nowrap;
+}
+.badge.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 42%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.badge.run{color:var(--warn);border-color:rgba(230,199,154,.35);background:rgba(230,199,154,.06)}
+.badge.lead{color:var(--accent);border-color:var(--accent-dim);background:var(--accent-faint);font-size:9.5px}
+.badge.err{color:var(--err);border-color:rgba(224,154,154,.35)}
+.score-pill{
+  font-family:var(--font-mono);font-size:11px;color:var(--accent);
+  border:1px solid var(--accent-dim);background:var(--accent-faint);
+  padding:2px 7px;border-radius:6px;letter-spacing:.02em;
+}
+.dept-tag{
+  display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--text-faint);white-space:nowrap;
+}
+.dept-tag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--dept,var(--accent))}
+.type-tag{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;color:var(--text-faint)}
+
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:0 0 12px}
+.sec-head h2{
+  margin:0;font-family:var(--font-serif);font-size:17px;font-weight:500;
+  letter-spacing:.06em;
+}
+.sec-head .more{font-size:11px;color:var(--text-faint);letter-spacing:.08em}
+
+.card{
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--card);box-shadow:var(--shadow-soft);
+}
+.hairline{height:1px;background:var(--line);border:0;margin:20px 0}
+
+/* ================= language tab ================= */
+.lang-hero{
+  display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);
+  gap:44px;align-items:end;padding:38px 8px 40px;border-bottom:1px solid var(--line);
+}
+.lang-hero h1{
+  font-family:var(--font-serif);font-weight:400;font-size:clamp(38px,4.4vw,58px);
+  line-height:1.24;letter-spacing:.015em;margin:16px 0 22px;
+}
+.lang-hero h1 em{font-style:normal;color:var(--accent)}
+.lang-hero .lede{max-width:52ch;font-size:14.5px;line-height:1.9;color:var(--text-dim);margin:0 0 22px}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{
+  font-size:10.5px;letter-spacing:.1em;color:var(--text-dim);
+  border:1px solid var(--line);border-radius:999px;padding:4px 11px;background:var(--surface);
+}
+.specimen{
+  border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);
+  padding:22px 24px;box-shadow:var(--shadow-soft);position:relative;overflow:hidden;
+}
+.specimen::before{
+  content:"";position:absolute;inset:-40% -20% auto auto;width:280px;height:280px;border-radius:50%;
+  background:radial-gradient(circle,var(--accent-faint),transparent 68%);
+}
+.specimen .sp-top{display:flex;justify-content:space-between;align-items:center;font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;color:var(--text-faint)}
+.sp-big{
+  font-family:var(--font-mono);font-size:64px;font-weight:300;letter-spacing:-.04em;
+  color:var(--text);line-height:1;margin:20px 0 4px;
+}
+.sp-big span{font-size:17px;color:var(--text-faint);letter-spacing:0;margin-left:4px}
+.sp-line{height:1px;background:var(--line);margin:18px 0 12px}
+.sp-row{display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);padding:4px 0}
+.sp-row b{font-weight:400;color:var(--text-dim);font-family:var(--font-mono)}
+.sp-quote{
+  font-family:var(--font-serif);font-size:13.5px;line-height:1.8;color:var(--text-dim);
+  margin:14px 0 0;padding-left:12px;border-left:1px solid var(--accent-dim);
+}
+
+.lang-sec{margin-top:42px}
+.lang-label{
+  display:flex;align-items:center;gap:12px;margin-bottom:18px;
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.24em;color:var(--text-faint);
+}
+.lang-label::after{content:"";flex:1;height:1px;background:var(--line)}
+.principles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.pcard{
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);
+  padding:22px 22px 20px;transition:.35s;
+}
+.pcard:hover{border-color:var(--accent-dim);transform:translateY(-2px);box-shadow:var(--shadow-soft)}
+.pnum{font-family:var(--font-mono);font-size:10px;color:var(--accent);letter-spacing:.14em}
+.pcard h3{font-family:var(--font-serif);font-weight:500;font-size:18px;margin:12px 0 9px;letter-spacing:.06em}
+.pcard p{font-size:12.5px;line-height:1.9;color:var(--text-dim);margin:0}
+.pcard .pfoot{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;color:var(--text-faint)}
+
+.palette{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.pal-cap{
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.18em;color:var(--text-faint);
+  margin:0 0 9px;
+}
+.sw{
+  border:1px solid var(--line);border-radius:11px;overflow:hidden;
+  background:linear-gradient(180deg,var(--c) 0 56px,var(--surface) 56px);
+}
+.sw div{padding:65px 11px 9px}
+.sw b{display:block;font-size:11px;font-weight:400;color:var(--text-dim);letter-spacing:.08em}
+.sw span{display:block;font-family:var(--font-mono);font-size:9px;color:var(--text-faint);margin-top:3px;letter-spacing:.04em}
+.dept-pal{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:10px}
+.dept-pal .sw{background:linear-gradient(180deg,var(--c) 0 34px,var(--surface) 34px)}
+.dept-pal .sw div{padding:43px 11px 9px}
+
+.type-grid{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px}
+.type-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);padding:20px 22px;min-height:176px}
+.tlabel{font-family:var(--font-mono);font-size:9px;letter-spacing:.18em;color:var(--text-faint);margin-bottom:18px}
+.t-big{font-family:var(--font-serif);font-size:31px;line-height:1.45;font-weight:400;letter-spacing:.04em}
+.type-card p{font-size:13.5px;line-height:1.95;color:var(--text-dim);margin:0}
+.t-num{font-family:var(--font-mono);font-size:52px;font-weight:300;letter-spacing:-.03em;line-height:1}
+.t-num span{font-size:15px;color:var(--text-faint);margin-left:4px}
+.tmeta{margin-top:auto;padding-top:18px;font-family:var(--font-mono);font-size:9px;color:var(--text-faint);letter-spacing:.06em}
+.type-card{display:flex;flex-direction:column}
+
+.demo{
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:18px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);
+}
+.demo .divider{width:1px;height:22px;background:var(--line);margin:0 6px}
+.progress{width:150px;height:3px;border-radius:3px;background:var(--line);overflow:hidden}
+.progress i{display:block;height:100%;width:92%;background:linear-gradient(90deg,var(--accent),var(--accent-dim));border-radius:3px}
+
+.motions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.mcard{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);padding:20px 22px}
+.mdemo{height:52px;display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.mdot{width:36px;height:36px;border-radius:50%;border:1px solid var(--accent-dim);display:grid;place-items:center;background:var(--accent-faint);animation:breath 3.4s ease-in-out infinite}
+.mdot i{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+@keyframes breath{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 26px 3px var(--accent-glow)}}
+.mripple{width:30px;height:30px;border-radius:50%;border:1px solid var(--accent-dim);position:relative}
+.mripple::after{content:"";position:absolute;inset:-1px;border-radius:50%;border:1px solid var(--accent-dim);animation:ripple 2.2s cubic-bezier(.22,1,.36,1) infinite}
+@keyframes ripple{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.1);opacity:0}}
+.msweep{flex:1;height:2px;background:var(--line);position:relative;overflow:hidden;border-radius:2px}
+.msweep::after{content:"";position:absolute;top:0;bottom:0;width:36%;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:sweep 2.8s ease-in-out infinite}
+@keyframes sweep{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+.mcard h4{margin:0 0 6px;font-size:13px;font-weight:400;letter-spacing:.1em}
+.mcard p{margin:0;font-size:11.5px;line-height:1.8;color:var(--text-faint)}
+
+.asks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.ask-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);padding:20px 22px}
+.ask-num{font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;color:var(--accent)}
+.ask-card h4{font-family:var(--font-serif);font-size:16px;font-weight:500;margin:10px 0 8px;line-height:1.6}
+.ask-card p{font-size:12px;line-height:1.85;color:var(--text-dim);margin:0 0 14px}
+.ask-opts{display:flex;flex-wrap:wrap;gap:6px}
+.ask-opts span{font-size:10px;border:1px solid var(--line-strong);border-radius:999px;padding:3px 9px;color:var(--text-dim)}
+.ask-opts span.hot{border-color:var(--accent-dim);color:var(--accent);background:var(--accent-faint)}
+
+/* ================= spec notes ================= */
+.spec{
+  display:grid;grid-template-columns:1.15fr .85fr;gap:28px;
+  border:1px dashed var(--line-strong);border-radius:var(--r-md);
+  padding:18px 22px;margin-top:14px;background:transparent;
+}
+.spec-label{
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.22em;color:var(--accent);
+  margin-bottom:9px;
+}
+.spec ul{margin:0;padding:0;list-style:none}
+.spec li{
+  position:relative;padding-left:14px;font-size:11.5px;line-height:1.95;color:var(--text-dim);
+}
+.spec li::before{content:"";position:absolute;left:0;top:.85em;width:5px;height:1px;background:var(--accent-dim)}
+.spec .ask p{margin:0;font-size:11.5px;line-height:1.95;color:var(--text-dim)}
+.spec .ask .ask-opts{margin-top:9px}
+
+/* ================= app page shared ================= */
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:22px}
+.page-head h1{
+  font-family:var(--font-serif);font-weight:400;font-size:clamp(26px,2.7vw,36px);
+  line-height:1.35;letter-spacing:.02em;margin:10px 0 8px;
+}
+.page-head .sub{font-size:12.5px;line-height:1.8;color:var(--text-faint);margin:0;max-width:66ch}
+.head-actions{display:flex;gap:8px;flex:none;padding-bottom:4px}
+.crumb{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;color:var(--text-faint);margin-bottom:14px}
+.crumb b{font-weight:400;color:var(--text-dim)}
+
+/* home */
+.hero{
+  display:grid;grid-template-columns:minmax(0,1.02fr) minmax(360px,.98fr);
+  gap:38px;align-items:end;padding:6px 0 32px;border-bottom:1px solid var(--line);
+}
+.hero h1{
+  font-family:var(--font-serif);font-size:clamp(30px,3.3vw,44px);font-weight:400;
+  line-height:1.32;letter-spacing:.02em;margin:13px 0 17px;
+}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero .lede{max-width:48ch;font-size:13.5px;line-height:1.95;color:var(--text-dim);margin:0}
+.composer{
+  border:1px solid var(--line-strong);border-radius:16px;background:var(--card);
+  box-shadow:var(--shadow-soft);padding:17px 18px 14px;position:relative;overflow:hidden;
+}
+.composer::before{
+  content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent-dim),transparent);
+}
+.composer textarea{
+  width:100%;height:74px;resize:none;background:transparent;border:0;outline:0;
+  color:var(--text);font-family:inherit;font-size:14px;line-height:1.8;letter-spacing:.01em;
+}
+.composer textarea::placeholder{color:var(--text-faint)}
+.composer-foot{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--line)}
+.knob{
+  display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text-faint);
+  border:1px solid var(--line);border-radius:999px;padding:4px 10px;white-space:nowrap;
+}
+.knob b{font-family:var(--font-mono);font-weight:400;color:var(--text-dim)}
+.composer-foot .grow{flex:1}
+.kbd{
+  font-family:var(--font-mono);font-size:9px;color:var(--text-faint);
+  border:1px solid var(--line);border-bottom-color:var(--line-strong);
+  border-radius:5px;padding:2px 5px;
+}
+
+.pulse{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+  background:var(--surface);margin-top:20px;
+}
+.pulse .m{padding:15px 18px;border-right:1px solid var(--line)}
+.pulse .m:last-child{border-right:0}
+.metric b{
+  display:block;font-family:var(--font-mono);font-size:23px;font-weight:300;
+  letter-spacing:-.02em;line-height:1.1;
+}
+.metric b span{font-size:11px;color:var(--text-faint);letter-spacing:0;margin-left:4px}
+.metric small{display:block;margin-top:7px;font-size:10px;letter-spacing:.12em;color:var(--text-faint)}
+.ticker{
+  display:flex;align-items:center;gap:9px;margin-top:12px;
+  font-size:11px;color:var(--text-faint);letter-spacing:.02em;
+}
+.ticker b{font-weight:400;color:var(--text-dim)}
+
+.home-grid{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:22px;margin-top:24px;align-items:start}
+.lineage{border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:var(--surface)}
+.goal-row{
+  display:grid;grid-template-columns:46px minmax(0,1fr) auto 26px;gap:18px;
+  padding:19px 20px;border-bottom:1px solid var(--line);align-items:center;
+  cursor:pointer;transition:background .3s;position:relative;
+}
+.goal-row:last-child{border-bottom:0}
+.goal-row:hover{background:var(--sel)}
+.goal-row:hover .row-arrow{color:var(--accent);transform:translateX(3px)}
+.goal-id{
+  font-family:var(--font-mono);font-size:11px;color:var(--text-faint);letter-spacing:.1em;
+  border-right:1px solid var(--line);padding-right:12px;line-height:1.2;
+}
+.goal-id b{display:block;font-weight:400;color:var(--text-dim);font-size:14px}
+.goal-main h3{
+  margin:0 0 7px;font-family:var(--font-serif);font-size:16.5px;font-weight:500;
+  line-height:1.55;letter-spacing:.02em;
+}
+.goal-sub{display:flex;align-items:center;gap:10px;font-size:10.5px;color:var(--text-faint);margin-bottom:11px}
+.goal-steps{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.gstep{
+  display:inline-flex;align-items:center;gap:4px;font-size:9.5px;color:var(--text-faint);
+  border:1px solid var(--line);border-radius:999px;padding:2px 7px;white-space:nowrap;
+}
+.gstep::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--text-faint)}
+.gstep.done{color:var(--text-dim)}
+.gstep.done::before{background:var(--accent);box-shadow:0 0 6px var(--accent-glow)}
+.gstep.live{color:var(--warn);border-color:rgba(230,199,154,.3)}
+.gstep.live::before{background:var(--warn)}
+.gstep-sep{color:var(--text-faint);font-size:9px;opacity:.55}
+.goal-stats{display:flex;gap:20px;text-align:right;padding:0 6px}
+.gs b{display:block;font-family:var(--font-mono);font-size:15px;font-weight:400;letter-spacing:-.01em}
+.gs b em{font-style:normal;font-size:10px;color:var(--text-faint);margin-left:1px}
+.gs span{display:block;margin-top:4px;font-size:9px;letter-spacing:.1em;color:var(--text-faint);white-space:nowrap}
+.row-arrow{color:var(--text-faint);font-size:15px;transition:.3s}
+
+.rail-card{
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);
+  padding:16px 17px;box-shadow:var(--shadow-soft);
+}
+.rail-card + .rail-card{margin-top:12px}
+.rail-label{font-family:var(--font-mono);font-size:9px;letter-spacing:.2em;color:var(--text-faint);margin-bottom:13px}
+.ceo-line{display:flex;align-items:center;gap:11px}
+.avatar{
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;flex:none;
+  font-family:var(--font-serif);font-size:15px;color:var(--accent);
+  border:1px solid var(--accent-dim);background:var(--accent-faint);
+}
+.avatar.sm{width:26px;height:26px;font-size:11px}
+.avatar.xl{width:44px;height:44px;font-size:17px;box-shadow:0 0 22px var(--accent-faint)}
+.ceo-name{font-size:13px;letter-spacing:.08em}
+.ceo-role{font-size:9.5px;color:var(--text-faint);letter-spacing:.08em;margin-top:4px}
+.ceo-note{
+  margin-top:14px;padding:10px 12px;border-radius:9px;background:var(--accent-faint);
+  border-left:2px solid var(--accent-dim);font-size:11px;line-height:1.8;color:var(--text-dim);
+}
+.ceo-note b{color:var(--accent);font-weight:400}
+.mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}
+.mini-stats div{text-align:center;border-top:1px solid var(--line);padding-top:10px}
+.mini-stats b{display:block;font-family:var(--font-mono);font-size:14px;font-weight:400}
+.mini-stats span{display:block;font-size:8.5px;color:var(--text-faint);margin-top:3px;letter-spacing:.06em}
+.feed{display:flex;flex-direction:column;gap:0}
+.feed-item{display:grid;grid-template-columns:36px minmax(0,1fr);gap:8px;padding:9px 0;border-top:1px solid var(--line)}
+.feed-item:first-child{border-top:0;padding-top:0}
+.feed-time{font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);padding-top:2px}
+.feed-item p{margin:0;font-size:10.5px;line-height:1.7;color:var(--text-dim)}
+.feed-item p b{font-weight:400;color:var(--text)}
+.feed-dept{display:inline-flex;align-items:center;gap:4px;font-size:8.5px;color:var(--text-faint);margin-top:3px}
+.feed-dept::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--dept,var(--accent))}
+
+.recent{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.rcard{
+  border:1px solid var(--line);border-radius:11px;background:var(--card-flat);
+  padding:13px 14px;display:flex;flex-direction:column;gap:9px;transition:.28s;cursor:pointer;
+}
+.rcard:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+.rcard h4{margin:0;font-family:var(--font-serif);font-size:13px;font-weight:500;line-height:1.55;letter-spacing:.03em}
+.rcard .rm{display:flex;align-items:center;gap:8px;font-size:8.5px;color:var(--text-faint)}
+.rcard .rm .score-pill{margin-left:auto;font-size:9px;padding:1px 5px}
+.rcard .rp{margin:0;font-size:10px;line-height:1.75;color:var(--text-faint);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* goal detail */
+.pipeline{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+  background:var(--surface);margin-bottom:20px;
+}
+.pstep{padding:14px 18px 15px;border-right:1px solid var(--line);position:relative}
+.pstep:last-child{border-right:0}
+.pstep::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--line)}
+.pstep.done::before{background:var(--accent);opacity:.8}
+.pstep.live::before{background:linear-gradient(90deg,var(--accent),var(--line))}
+.pnum{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);letter-spacing:.12em}
+.pstep.done .pnum{color:var(--accent)}
+.pstep b{display:block;font-size:12.5px;font-weight:400;margin:8px 0 4px;letter-spacing:.06em}
+.pstep small{display:block;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);letter-spacing:.02em}
+
+.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 314px;gap:18px;align-items:start}
+.ws{
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);
+  overflow:hidden;margin-bottom:14px;
+}
+.ws-head{display:flex;align-items:center;gap:10px;padding:13px 17px;border-bottom:1px solid var(--line)}
+.ws-dot{width:7px;height:7px;border-radius:2px;background:var(--dept);box-shadow:0 0 10px color-mix(in srgb,var(--dept) 60%,transparent)}
+.ws-head h3{margin:0;font-size:13px;font-weight:400;letter-spacing:.1em}
+.ws-lead{font-size:9.5px;color:var(--text-faint);letter-spacing:.04em}
+.ws-meta{margin-left:auto;display:flex;align-items:center;gap:8px}
+.dv{
+  display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:12px;
+  padding:12px 17px;border-bottom:1px solid var(--line);align-items:center;
+  transition:background .25s;cursor:pointer;
+}
+.dv:last-child{border-bottom:0}
+.dv:hover{background:var(--sel)}
+.dv-idx{font-family:var(--font-mono);font-size:9px;color:var(--text-faint)}
+.dv h4{margin:0 0 4px;font-size:12.5px;font-weight:400;line-height:1.5}
+.dv-meta{font-size:9.5px;color:var(--text-faint);display:flex;gap:9px}
+.dv .arrow{color:var(--text-faint);font-size:12px}
+
+.aside-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);padding:17px;box-shadow:var(--shadow-soft)}
+.aside-card + .aside-card{margin-top:12px}
+.donut-wrap{display:flex;align-items:center;gap:18px}
+.donut{
+  width:96px;height:96px;border-radius:50%;flex:none;position:relative;
+  background:conic-gradient(var(--accent) 0 100%,var(--line) 0);
+  display:grid;place-items:center;
+}
+.donut::before{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--card-flat)}
+.donut b{position:relative;font-family:var(--font-mono);font-size:21px;font-weight:400}
+.donut b em{font-style:normal;font-size:10px;color:var(--text-faint)}
+.donut-side b{display:block;font-family:var(--font-serif);font-size:15px;font-weight:500;margin-bottom:6px}
+.donut-side span{display:block;font-size:10px;color:var(--text-faint);line-height:1.7}
+.qrow{display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:11px;color:var(--text-faint)}
+.qrow:last-child{border-bottom:0;padding-bottom:0}
+.qrow b{font-family:var(--font-mono);font-weight:400;font-size:13px;color:var(--text)}
+.qrow b.ok{color:var(--accent)}
+.bars{display:flex;flex-direction:column;gap:11px;margin-top:2px}
+.bar-row{font-size:10px;color:var(--text-faint)}
+.bar-top{display:flex;justify-content:space-between;margin-bottom:5px}
+.bar-top b{font-weight:400;color:var(--text-dim)}
+.bar{height:3px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--dept,var(--accent));border-radius:3px;opacity:.85}
+
+/* org */
+.org-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.org-badge{margin-right:auto;display:flex;gap:16px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.1em;color:var(--text-faint)}
+.org-badge b{font-weight:400;color:var(--text-dim)}
+.org-scroll{overflow-x:auto;padding-bottom:6px}
+.org-inner{min-width:980px;padding:8px 6px 4px}
+.org-ceo{display:flex;justify-content:center}
+.ceo-card{
+  display:flex;align-items:center;gap:14px;padding:13px 22px;
+  border:1px solid var(--accent-dim);border-radius:var(--r-md);background:var(--card);
+  box-shadow:0 0 34px var(--accent-faint);
+}
+.ceo-card .ceo-name{font-family:var(--font-serif);font-size:16px;letter-spacing:.1em}
+.ceo-card .ceo-role{font-size:9.5px;color:var(--accent);letter-spacing:.12em;margin-top:3px;opacity:.85}
+.ceo-card .ceo-pill{font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);border:1px solid var(--line);padding:3px 8px;border-radius:999px;margin-left:12px;letter-spacing:.06em}
+.org-trunk{width:1px;height:26px;background:var(--line-strong);margin:0 auto}
+.org-branches{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:13px;padding-top:26px}
+.org-branches::before{content:"";position:absolute;top:0;left:10%;right:10%;height:1px;background:var(--line-strong)}
+.dept-col{position:relative;padding-top:12px}
+.dept-col::before{content:"";position:absolute;top:-26px;left:50%;width:1px;height:38px;background:var(--line-strong)}
+.dept-head{display:flex;align-items:center;gap:7px;margin-bottom:9px;padding:0 2px}
+.dept-head .d{width:6px;height:6px;border-radius:2px;background:var(--dept);box-shadow:0 0 9px color-mix(in srgb,var(--dept) 60%,transparent)}
+.dept-head h3{font-size:12px;font-weight:400;letter-spacing:.12em;margin:0}
+.dept-head .cnt{font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);margin-left:auto}
+.dept-head .add{font-size:11px;color:var(--text-faint);cursor:pointer}
+.emp{
+  border:1px solid var(--line);border-left:2px solid var(--dept);border-radius:9px;
+  background:var(--card-flat);padding:9px 11px;margin-bottom:7px;transition:.28s;
+}
+.emp:hover{transform:translateY(-1px);border-color:var(--line-strong);border-left-color:var(--dept)}
+.emp.lead{background:var(--card);box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.emp-top{display:flex;align-items:center;gap:6px}
+.emp-name{font-size:11.5px;letter-spacing:.06em}
+.emp-top .badge{margin-left:auto;padding:1px 5px;font-size:8px;letter-spacing:.02em}
+.emp-role{font-size:9px;color:var(--text-faint);margin-top:4px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.emp-foot{display:flex;align-items:center;gap:5px;margin-top:7px;font-size:8.5px;color:var(--text-faint)}
+.emp-nums{margin-left:auto;font-family:var(--font-mono);font-size:8px;letter-spacing:.01em}
+.org-strip{
+  display:flex;flex-wrap:wrap;gap:22px;margin-top:20px;padding-top:14px;
+  border-top:1px solid var(--line);font-size:10px;color:var(--text-faint);letter-spacing:.06em;
+}
+.org-strip b{font-weight:400;color:var(--text-dim);font-family:var(--font-mono);margin-right:4px}
+
+/* board */
+.ops{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) 1.25fr;
+  border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+  background:var(--surface);
+}
+.ops .m{padding:14px 17px;border-right:1px solid var(--line)}
+.ops .tour{padding:14px 17px;background:var(--accent-faint);border-right:0}
+.tour-line{display:flex;align-items:center;gap:9px}
+.tour-line b{font-size:11px;font-weight:400;letter-spacing:.08em}
+.tour-line span{font-size:9px;color:var(--text-faint);margin-left:auto;font-family:var(--font-mono)}
+.tour-note{font-size:10px;color:var(--text-dim);margin-top:7px;line-height:1.6}
+.cmdbar{
+  display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 10px 9px 14px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);
+}
+.cmdbar p{margin:0;flex:1;font-size:12px;color:var(--text-faint);letter-spacing:.02em}
+.cmdbar .select{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text-dim);border:1px solid var(--line);border-radius:7px;padding:5px 9px}
+.board-grid{display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:14px;margin-top:14px;align-items:start}
+.lanes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}
+.lane{border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;max-height:560px}
+.lane-head{display:flex;align-items:center;gap:6px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.lane-head h3{margin:0;font-size:10.5px;font-weight:400;letter-spacing:.1em;white-space:nowrap}
+.lane-head .n{font-family:var(--font-mono);font-size:9px;color:var(--text-faint);margin-left:auto}
+.lane-head .dot{margin-right:1px}
+.lane-body{padding:8px;display:flex;flex-direction:column;gap:7px;overflow:auto}
+.task{
+  border:1px solid var(--line);border-radius:9px;background:var(--card-flat);
+  padding:10px 11px;cursor:pointer;transition:.28s;
+}
+.task:hover{border-color:var(--line-strong);transform:translateY(-1px)}
+.task-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.task-id{font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);letter-spacing:.08em}
+.task h4{margin:7px 0 9px;font-size:11.5px;font-weight:400;line-height:1.6;color:var(--text)}
+.task-foot{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:8.5px;color:var(--text-faint)}
+.task-foot .who{display:flex;align-items:center;gap:4px}
+.lane-body::-webkit-scrollbar{width:3px}
+.live-card{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:14px;box-shadow:var(--shadow-soft)}
+.live-head{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.live-head h3{margin:0;font-size:11.5px;font-weight:400;letter-spacing:.1em}
+.live-head .dot{margin-left:auto}
+.live-item{padding:9px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:31px minmax(0,1fr);gap:7px}
+.live-item:first-of-type{border-top:0}
+.live-item time{font-family:var(--font-mono);font-size:8px;color:var(--text-faint);padding-top:2px}
+.live-item p{margin:0;font-size:10px;line-height:1.65;color:var(--text-dim)}
+.live-item p b{font-weight:400;color:var(--text)}
+.live-item .who{display:block;margin-top:2px;font-size:8px;color:var(--text-faint)}
+
+/* artifacts */
+.art-grid{display:grid;grid-template-columns:170px minmax(0,1fr) 388px;gap:15px;align-items:start;margin-top:4px}
+.filter{padding:2px 0}
+.fgroup{margin-bottom:19px}
+.fgroup h4{margin:0 0 7px;font-family:var(--font-mono);font-size:8.5px;font-weight:400;letter-spacing:.2em;color:var(--text-faint)}
+.flist label{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:var(--text-dim);padding:5px 0;cursor:pointer}
+.flist label .c{font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint)}
+.flist label.on{color:var(--accent)}
+.art-list{border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:var(--surface)}
+.arow{display:block;padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer;position:relative;transition:background .25s}
+.arow:last-child{border-bottom:0}
+.arow:hover{background:var(--sel)}
+.arow.on{background:var(--sel)}
+.arow.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--accent);box-shadow:0 0 10px var(--accent-glow)}
+.arow h4{margin:0 0 6px;font-family:var(--font-serif);font-size:13.5px;font-weight:500;line-height:1.55;letter-spacing:.03em}
+.arow .am{display:flex;align-items:center;gap:9px;font-size:8.5px;color:var(--text-faint)}
+.arow .am .score-pill{font-size:9px;padding:1px 5px;margin-left:auto}
+.reader{
+  position:sticky;top:78px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--card);box-shadow:var(--shadow-soft);max-height:660px;overflow:auto;
+}
+.reader-head{padding:17px 21px 13px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:2}
+.rd-eyebrow{font-family:var(--font-mono);font-size:8.5px;letter-spacing:.12em;color:var(--text-faint);margin-bottom:8px}
+.rd-title{font-family:var(--font-serif);font-size:20px;font-weight:500;line-height:1.5;letter-spacing:.03em;margin:0 0 10px}
+.rd-meta{display:flex;align-items:center;gap:9px;font-size:9px;color:var(--text-faint)}
+.reader-body{padding:16px 21px 20px}
+.qa{
+  border:1px solid var(--accent-dim);background:var(--accent-faint);border-radius:9px;
+  padding:10px 13px;margin-bottom:16px;
+}
+.qa-top{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--accent);margin-bottom:5px}
+.qa p{margin:0;font-size:10.5px;line-height:1.75;color:var(--text-dim)}
+.rd-p{font-family:var(--font-serif);font-size:12.5px;line-height:2;color:var(--text-dim);margin:0 0 13px}
+.rd-p strong{color:var(--text);font-weight:500}
+.rd-h{font-family:var(--font-serif);font-size:13.5px;font-weight:500;margin:18px 0 8px;padding-left:9px;border-left:2px solid var(--accent-dim)}
+.rd-table{width:100%;border-collapse:collapse;font-size:10px;margin:12px 0}
+.rd-table th,.rd-table td{border:1px solid var(--line);padding:6px 8px;text-align:left}
+.rd-table th{font-weight:400;color:var(--accent);background:var(--surface-2);letter-spacing:.04em}
+.rd-table td{color:var(--text-dim)}
+.rd-foot{display:flex;gap:7px;padding-top:14px;border-top:1px solid var(--line);margin-top:16px}
+
+/* settings */
+.set-grid{display:grid;grid-template-columns:190px minmax(0,1fr);gap:24px;align-items:start}
+.set-nav{border-left:1px solid var(--line);padding:2px 0 2px 1px;position:sticky;top:84px}
+.set-nav a{
+  display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:11.5px;color:var(--text-faint);
+  text-decoration:none;border-radius:0 8px 8px 0;transition:.3s;letter-spacing:.04em;
+}
+.set-nav a:hover{color:var(--text-dim);background:var(--sel)}
+.set-nav a.on{color:var(--accent);background:var(--accent-faint)}
+.set-nav a.on::before{content:"";width:2px;height:12px;background:var(--accent);border-radius:2px;margin-left:-15px;margin-right:3px;box-shadow:0 0 8px var(--accent-glow)}
+.set-main{display:flex;flex-direction:column;gap:14px}
+.set-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);overflow:hidden}
+.set-card-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.set-card-head h3{margin:0;font-family:var(--font-serif);font-size:14.5px;font-weight:500;letter-spacing:.06em}
+.set-card-head p{margin:3px 0 0;font-size:10px;color:var(--text-faint)}
+.set-body{padding:4px 18px}
+.set-row{display:flex;align-items:center;gap:18px;padding:13px 0;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:0}
+.set-row .lbl{flex:1;min-width:0}
+.set-row .lbl b{display:block;font-size:12px;font-weight:400;letter-spacing:.03em}
+.set-row .lbl span{display:block;font-size:10px;line-height:1.7;color:var(--text-faint);margin-top:3px}
+.set-row .ctl{flex:none;display:flex;align-items:center;gap:9px}
+.model-row{
+  display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid var(--line);
+}
+.model-row:last-child{border-bottom:0}
+.model-ico{
+  width:32px;height:32px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;
+  font-family:var(--font-mono);font-size:9.5px;color:var(--text-dim);background:var(--surface-2);flex:none;
+}
+.model-main{flex:1;min-width:0}
+.model-main b{display:block;font-size:12px;font-weight:400;letter-spacing:.03em}
+.model-main span{display:block;font-size:9.5px;color:var(--text-faint);margin-top:4px;font-family:var(--font-mono);letter-spacing:.02em}
+.togg{
+  width:34px;height:18px;border-radius:999px;background:var(--line);position:relative;
+  cursor:pointer;transition:.3s;flex:none;border:1px solid var(--line-strong);
+}
+.togg::after{
+  content:"";position:absolute;width:12px;height:12px;border-radius:50%;background:var(--text-faint);
+  top:2px;left:2px;transition:.3s;
+}
+.togg.on{background:var(--accent-faint);border-color:var(--accent-dim)}
+.togg.on::after{left:18px;background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
+.slider{display:flex;align-items:center;gap:10px;width:220px}
+.slider .track{flex:1;height:3px;background:var(--line);border-radius:3px;position:relative}
+.slider .fill{position:absolute;left:0;top:0;bottom:0;width:85%;background:var(--accent);border-radius:3px}
+.slider .knob2{position:absolute;left:85%;top:50%;width:11px;height:11px;border-radius:50%;background:var(--bg);border:1.5px solid var(--accent);transform:translate(-50%,-50%);box-shadow:0 0 8px var(--accent-glow)}
+.slider b{font-family:var(--font-mono);font-size:12px;font-weight:400;color:var(--accent);width:22px;text-align:right}
+.stepper{display:flex;align-items:center;border:1px solid var(--line-strong);border-radius:7px;overflow:hidden}
+.stepper span{width:24px;height:24px;display:grid;place-items:center;font-size:11px;color:var(--text-faint);cursor:pointer}
+.stepper b{width:28px;text-align:center;font-family:var(--font-mono);font-size:11px;font-weight:400;border-left:1px solid var(--line);border-right:1px solid var(--line);line-height:24px}
+.tip{
+  margin:0 18px 16px;padding:10px 12px;border-radius:8px;background:var(--surface-2);
+  border-left:2px solid var(--warm);font-size:10px;line-height:1.8;color:var(--text-faint);
+}
+.tip b{font-weight:400;color:var(--warm)}
+.set2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+
+/* footer */
+.deck-foot{
+  display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  margin-top:26px;padding-top:14px;border-top:1px solid var(--line);
+  font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;color:var(--text-faint);
+}
+
+/* ================= responsive ================= */
+@media (max-width:1180px){
+  .lang-hero{grid-template-columns:1fr;gap:26px;align-items:start}
+  .home-grid{grid-template-columns:1fr}
+  .detail-grid{grid-template-columns:1fr}
+  .board-grid{grid-template-columns:1fr}
+  .art-grid{grid-template-columns:150px minmax(0,1fr) 350px}
+  .palette{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media (max-width:980px){
+  .deck-main{padding:16px 14px 40px}
+  .deckbar{padding:10px 14px;gap:12px;flex-wrap:wrap}
+  .db-tabs{order:3;width:100%;flex:1 1 100%}
+  .appbody{padding:20px 16px 32px}
+  .db-live{order:2;margin-left:auto}
+  .hero{grid-template-columns:1fr;gap:22px;padding-bottom:24px}
+  .pulse{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pulse .m:nth-child(2){border-right:0}
+  .pulse .m:nth-child(1),.pulse .m:nth-child(2){border-bottom:1px solid var(--line)}
+  .principles,.motions,.asks{grid-template-columns:1fr}
+  .type-grid{grid-template-columns:1fr}
+  .goal-row{grid-template-columns:38px minmax(0,1fr) 24px}
+  .goal-stats{grid-column:2;display:flex;gap:22px;text-align:left;padding:9px 0 0}
+  .row-arrow{grid-column:3;grid-row:1}
+  .ops{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ops .m{border-bottom:1px solid var(--line)}
+  .ops .tour{grid-column:1 / -1}
+  .lanes{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .art-grid{grid-template-columns:1fr}
+  .filter{display:flex;gap:26px;flex-wrap:wrap}
+  .reader{position:static;max-height:none}
+  .set-grid{grid-template-columns:1fr}
+  .set-nav{position:static;display:flex;gap:2px;overflow-x:auto;border-left:0;padding:0}
+  .set-nav a{border-radius:8px;white-space:nowrap}
+  .set-nav a.on::before{display:none}
+  .set2{grid-template-columns:1fr}
+  .spec{grid-template-columns:1fr;gap:16px}
+}
+@media (max-width:640px){
+  .brand .ae,.db-brand span{display:none}
+  .lang-hero h1{font-size:34px}
+  .palette{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dept-pal{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .page-head{flex-direction:column;align-items:flex-start;gap:12px}
+  .lanes{grid-template-columns:1fr}
+  .org-inner{min-width:920px}
+  .goal-stats{gap:16px}
+  .type-grid{grid-template-columns:1fr}
+  .deck-foot{flex-direction:column}
+}
+
+/* ================= process motion ================= */
+.play-btn{
+  display:inline-flex;align-items:center;gap:7px;flex:none;appearance:none;cursor:pointer;
+  border:1px solid var(--accent-dim);background:var(--accent-faint);color:var(--accent);
+  font-size:10.5px;letter-spacing:.12em;padding:6px 13px;border-radius:999px;
+  transition:box-shadow .3s,color .3s,background .3s;white-space:nowrap;
+}
+.play-btn i{font-style:normal;font-size:8px;transform:translateY(-.5px)}
+.play-btn:hover{box-shadow:0 0 18px var(--accent-glow)}
+.play-btn.busy{color:var(--warm);border-color:rgba(230,199,154,.36);background:transparent}
+
+/* scroll / tab reveal — only arms when JS is alive, so nothing can end up invisible */
+html.anim [data-rv]{opacity:0;transform:translateY(16px);
+  transition:opacity .55s ease var(--d,0ms),transform .62s cubic-bezier(.22,1,.36,1) var(--d,0ms)}
+html.anim [data-rv].in{opacity:1;transform:none}
+
+/* pipeline: the stage that is currently working */
+.pipeline{position:relative}
+html.anim .pstep[data-st="run"]::before{
+  background:linear-gradient(90deg,var(--accent),var(--warm),var(--accent));
+  background-size:220% 100%;animation:flowdash 1.9s linear infinite;opacity:1;
+}
+html.anim .pstep[data-st="run"] .pnum{animation:breath 2.1s ease-in-out infinite;border-radius:50%}
+.pstep[data-st="wait"]{opacity:.42;transition:opacity .5s}
+@keyframes flowdash{from{background-position:0 0}to{background-position:-220% 0}}
+html.anim .pipeline.busy::after{
+  content:"";position:absolute;left:0;top:0;height:2px;width:120px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  animation:travel 1.5s cubic-bezier(.4,0,.6,1) infinite;
+}
+@keyframes travel{from{transform:translateX(-120px)}to{transform:translateX(var(--pw,1000px))}}
+
+/* a deliverable landing, a score being stamped */
+html.anim .dv.landing{animation:landRow .78s cubic-bezier(.22,1,.36,1) both}
+@keyframes landRow{
+  0%{opacity:0;transform:translateY(12px)}
+  55%{opacity:1;transform:none;box-shadow:0 0 0 1px var(--accent-glow)}
+  100%{opacity:1;transform:none;box-shadow:0 0 0 1px transparent}
+}
+html.anim .score-pill.pop{animation:pop .6s cubic-bezier(.34,1.56,.64,1) both}
+@keyframes pop{0%{transform:scale(.4);opacity:0}62%{transform:scale(1.16);opacity:1}100%{transform:scale(1)}}
+html.anim .badge.flip{animation:flipIn .5s cubic-bezier(.22,1,.36,1) both}
+@keyframes flipIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+html.anim .feed-item.fresh{animation:slideIn .6s cubic-bezier(.22,1,.36,1) both}
+@keyframes slideIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+html.anim .live-item.fresh{animation:slideIn .6s cubic-bezier(.22,1,.36,1) both}
+html.anim .live-item{transition:opacity .4s}
+html.anim .task.landing,html.anim .goal-row.landing{animation:landRow .78s cubic-bezier(.22,1,.36,1) both}
+html.anim .gstep.live::before{animation:pulse 1.6s ease-in-out infinite}
+html.anim .gstep.done::before{transition:box-shadow .4s}
+
+/* live work inside a card */
+.tprog{height:2px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:9px}
+.tprog i{display:block;height:100%;width:4%;border-radius:2px;
+  background:linear-gradient(90deg,var(--dept,var(--accent)),transparent);transition:width .85s linear}
+.task{transition:transform .45s cubic-bezier(.22,1,.36,1),box-shadow .3s,border-color .3s}
+.lane-head .n{font-variant-numeric:tabular-nums}
+html.anim .lane.receiving{animation:laneGlow 1.1s ease both}
+@keyframes laneGlow{0%{box-shadow:inset 0 0 0 0 transparent}38%{box-shadow:inset 0 0 26px -6px var(--accent-glow)}100%{box-shadow:inset 0 0 0 0 transparent}}
+
+/* streaming text: the composer typing a goal, the counter ticking */
+html.anim .ticker .tk{display:inline-block;animation:tickUp .55s cubic-bezier(.22,1,.36,1) both}
+@keyframes tickUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.caret{display:inline-block;width:1px;height:1em;background:var(--accent);vertical-align:-2px;
+  margin-left:2px;animation:blink 1.05s steps(2,start) infinite}
+@keyframes blink{50%{opacity:0}}
+.pulse-btn{animation:btnGlow 1.8s ease-in-out infinite}
+@keyframes btnGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 22px -2px var(--accent-glow)}}
+
+/* org: who is actually working right now */
+html.anim .avatar.hot{animation:breath 3.2s ease-in-out infinite;position:relative}
+html.anim .avatar.hot::after{content:"";position:absolute;inset:-2px;border-radius:50%;
+  border:1px solid var(--accent-dim);animation:ripple 2.4s cubic-bezier(.22,1,.36,1) infinite}
+html.anim .dept-col.spot .dept-head{border-color:var(--accent-dim)}
+html.anim .emp.hot{border-color:var(--accent-dim);box-shadow:0 0 20px -8px var(--accent-glow)}
+html.anim .emp.hot .emp-name::after{content:"";display:inline-block;width:4px;height:4px;margin-left:6px;
+  border-radius:50%;background:var(--warn);vertical-align:2px;animation:pulse 1.5s ease-in-out infinite}
+
+/* artifacts: the reading pane turns a page */
+html.anim .reader-body.turn{animation:pageIn .5s cubic-bezier(.22,1,.36,1) both}
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* universal micro-interaction */
+html.anim .rcard:hover,html.anim .arow:hover{transform:translateY(-2px)}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+
+<header class="deckbar">
+  <div class="db-brand">
+    <span class="mark"><i></i></span><span class="an">空白格</span><span class="ae">BLANKGRID</span>
+  </div>
+  <nav class="db-tabs" id="tabs">
+    <button data-tab="home" class="on">目标</button>
+    <button data-tab="org">组织</button>
+    <button data-tab="board">看板</button>
+    <button data-tab="artifacts">成果</button>
+    <button data-tab="settings">设置</button>
+    <span class="db-sep"></span>
+    <button data-tab="goal" class="ghost">项目详情</button>
+    <button data-tab="language" class="ghost">设计语言</button>
+  </nav>
+  <div class="db-live"><span class="dot run"></span>施工中 <b id="live-n">2</b><span class="sep"></span>17 人 · 5 部门<span class="sep"></span><span id="clock">14:12:08</span></div>
+  <button class="play-btn" id="play" title="重放目标从拆解到归档的全过程动效"><i>▶</i>播放施工过程</button>
+  <div class="theme-toggle">
+    <button data-theme-btn="ink" class="on">墨夜</button>
+    <button data-theme-btn="paper">宣纸</button>
+  </div>
+</header>
+
+<main class="deck-main">
+
+  <!-- ================= 设计语言 ================= -->
+  <section class="tab-panel" data-panel="language">
+    <div class="page-hint"><span><b>DESIGN LANGUAGE</b> · 视觉基调与组件规范</span><span>动效稿 · 未改动站点代码</span></div>
+
+    <section class="lang-hero">
+      <div>
+        <div class="eyebrow">BLANKGRID · DESIGN LANGUAGE 2026</div>
+        <h1>留白，是为了<br>让<em>产出</em>被看见。</h1>
+        <p class="lede">
+          不喧哗的界面，才托得住持续产出的内容。这一版把视觉重心从「装饰」移到「信息」：
+          更少的线、更准的光、更清楚的层级。目标、进度、成果是唯一的主角，其余都退到次级层。
+        </p>
+        <div class="chips">
+          <span class="chip">墨夜 · 天青</span>
+          <span class="chip">宣纸 · 朱砂</span>
+          <span class="chip">衬线标题</span>
+          <span class="chip">等宽数字</span>
+          <span class="chip">呼吸光状态</span>
+          <span class="chip">施工动效</span>
+        </div>
+      </div>
+      <aside class="specimen">
+        <div class="sp-top"><span>QUALITY CONTRACT</span><span>GOAL 001</span></div>
+        <div class="sp-big">92<span>/100</span></div>
+        <div class="sp-line"></div>
+        <div class="sp-row"><span>质量门槛</span><b>85</b></div>
+        <div class="sp-row"><span>交付完成</span><b>4 / 4</b></div>
+        <div class="sp-row"><span>返工次数</span><b>0</b></div>
+        <div class="sp-row"><span>消耗 tokens</span><b>9,874</b></div>
+        <p class="sp-quote">「公司的价值不在忙碌，而在每一份交付都经得起打分。」</p>
+      </aside>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>01 / 三条原则</span></div>
+      <div class="principles">
+        <article class="pcard">
+          <div class="pnum">PRINCIPLE 01</div>
+          <h3>留白即权力</h3>
+          <p>每屏只允许一个视觉主角。目标、进度、成果三类信息优先；配置、日志、元数据收进抽屉与次级层。</p>
+          <div class="pfoot">ONE FOCAL POINT PER SCREEN</div>
+        </article>
+        <article class="pcard">
+          <div class="pnum">PRINCIPLE 02</div>
+          <h3>光线即状态</h3>
+          <p>用呼吸光、涟漪与色温表达运行、完成、异常，而不是弹窗与红点。安静，但随时可读。</p>
+          <div class="pfoot">LIGHT AS SYSTEM STATUS</div>
+        </article>
+        <article class="pcard">
+          <div class="pnum">PRINCIPLE 03</div>
+          <h3>数字即证据</h3>
+          <p>分数、tokens、交付数量一律等宽并右对齐。让「产出有没有价值」不靠形容词，靠可比较的数字。</p>
+          <div class="pfoot">TABULAR NUMBERS, RIGHT ALIGNED</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>02 / 色板</span></div>
+      <div class="pal-cap">墨夜 · 天青 —— 默认主题</div>
+      <div class="palette">
+        <div class="sw" style="--c:#05070a"><div><b>墨底</b><span>#05070A</span></div></div>
+        <div class="sw" style="--c:#0b1018"><div><b>面板</b><span>#0B1018</span></div></div>
+        <div class="sw" style="--c:#101722"><div><b>次级面</b><span>#101722</span></div></div>
+        <div class="sw" style="--c:#8ce7d9"><div><b>天青</b><span>#8CE7D9</span></div></div>
+        <div class="sw" style="--c:#e6d3af"><div><b>暖砂</b><span>#E6D3AF</span></div></div>
+        <div class="sw" style="--c:#d1806b"><div><b>砖红</b><span>#D1806B</span></div></div>
+      </div>
+      <div class="dept-pal">
+        <div class="sw" style="--c:#c5b3ef"><div><b>产品部</b><span>PLUM</span></div></div>
+        <div class="sw" style="--c:#97c6ec"><div><b>技术部</b><span>AZURE</span></div></div>
+        <div class="sw" style="--c:#eebccf"><div><b>设计部</b><span>ROSE</span></div></div>
+        <div class="sw" style="--c:#eecaa0"><div><b>市场部</b><span>SAND</span></div></div>
+        <div class="sw" style="--c:#b3d9b5"><div><b>职能部</b><span>MOSS</span></div></div>
+      </div>
+
+      <div class="pal-cap" style="margin-top:26px">宣纸 · 朱砂 —— 备选主题</div>
+      <div class="palette">
+        <div class="sw" style="--c:#e9e2d3"><div><b>纸底</b><span>#E9E2D3</span></div></div>
+        <div class="sw" style="--c:#faf6ec"><div><b>面板</b><span>#FAF6EC</span></div></div>
+        <div class="sw" style="--c:#f3ecdd"><div><b>次级面</b><span>#F3ECDD</span></div></div>
+        <div class="sw" style="--c:#a5462f"><div><b>朱砂</b><span>#A5462F</span></div></div>
+        <div class="sw" style="--c:#8a6a3f"><div><b>褐金</b><span>#8A6A3F</span></div></div>
+        <div class="sw" style="--c:#2f6f64"><div><b>松绿</b><span>#2F6F64</span></div></div>
+      </div>
+      <div class="dept-pal">
+        <div class="sw" style="--c:#6b5397"><div><b>产品部</b><span>PLUM</span></div></div>
+        <div class="sw" style="--c:#2f6389"><div><b>技术部</b><span>AZURE</span></div></div>
+        <div class="sw" style="--c:#a34f6c"><div><b>设计部</b><span>ROSE</span></div></div>
+        <div class="sw" style="--c:#94602a"><div><b>市场部</b><span>SAND</span></div></div>
+        <div class="sw" style="--c:#3f6b40"><div><b>职能部</b><span>MOSS</span></div></div>
+      </div>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>03 / 字体</span></div>
+      <div class="type-grid">
+        <div class="type-card">
+          <div class="tlabel">衬线 · 标题与阅读</div>
+          <div class="t-big">让目标自己长出组织</div>
+          <div class="tmeta">NOTO SERIF SC / 400 / 46 · 行高 1.3</div>
+        </div>
+        <div class="type-card">
+          <div class="tlabel">无衬线 · 界面正文</div>
+          <p>公司只需要一个目标，剩下的由组织完成。每个部门知道自己交付什么，也知道会被怎样打分。</p>
+          <div class="tmeta">HARMONYOS SANS / 300 / 13.5 · 行高 1.95</div>
+        </div>
+        <div class="type-card">
+          <div class="tlabel">等宽 · 证据</div>
+          <div class="t-num">92<span>/100</span></div>
+          <div class="tmeta">JETBRAINS MONO / 400 / TABULAR</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>04 / 组件</span></div>
+      <div class="demo">
+        <button class="btn primary">发布目标</button>
+        <button class="btn">导出 ZIP</button>
+        <button class="btn quiet">＋ 部门</button>
+        <span class="divider"></span>
+        <span class="badge ok"><span class="dot on"></span>已归档</span>
+        <span class="badge run"><span class="dot run"></span>执行中</span>
+        <span class="badge">待执行</span>
+        <span class="score-pill">92</span>
+        <span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span>
+        <span class="status" style="display:inline-flex;align-items:center;gap:5px;font-size:10px;color:var(--text-faint)"><i class="dot on"></i>在岗</span>
+        <span class="divider"></span>
+        <span class="progress"><i></i></span>
+      </div>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>05 / 动效</span></div>
+      <div class="motions">
+        <div class="mcard">
+          <div class="mdemo"><span class="mdot"><i></i></span><span class="mm">呼吸</span></div>
+          <h4>呼吸 · 3.4s</h4>
+          <p>用于「在线 / 运行中」的持续状态，只在低亮度下发光，不抢注意力。</p>
+        </div>
+        <div class="mcard">
+          <div class="mdemo"><span class="mripple"></span><span class="mm">涟漪</span></div>
+          <h4>涟漪 · 2.2s</h4>
+          <p>用于一次完成、一次审批。扩散即结束，不留下常驻装饰。</p>
+        </div>
+        <div class="mcard">
+          <div class="mdemo"><span class="msweep"></span></div>
+          <h4>扫光 · 2.8s</h4>
+          <p>用于正在生成的内容占位，替代转圈加载，保持阅读的连续性。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="lang-sec">
+      <div class="lang-label"><span>06 / 全局待拍板</span></div>
+      <div class="asks">
+        <div class="ask-card">
+          <div class="ask-num">QUESTION 01</div>
+          <h4>配色走哪一套？</h4>
+          <p>右上角可实时切换。墨夜延续现有品牌，更沉浸；宣纸更像一本公司刊物，白天阅读更舒服。</p>
+          <div class="ask-opts"><span class="hot">墨夜 · 天青</span><span>宣纸 · 朱砂</span><span>两套都保留</span></div>
+        </div>
+        <div class="ask-card">
+          <div class="ask-num">QUESTION 02</div>
+          <h4>标题用衬线吗？</h4>
+          <p>衬线让「公司」更像有主编的刊物；无衬线更工程师、更中性。正文始终保持无衬线。</p>
+          <div class="ask-opts"><span class="hot">中文衬线标题</span><span>保持无衬线</span><span>只用在成果正文</span></div>
+        </div>
+        <div class="ask-card">
+          <div class="ask-num">QUESTION 03</div>
+          <h4>信息密度？</h4>
+          <p>当前偏刊物感、留白多；也可以收紧行高与间距，一屏多放 20% 信息。两种都能做。</p>
+          <div class="ask-opts"><span class="hot">刊物感留白</span><span>更紧凑</span><span>可切换</span></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="deck-foot">
+      <span>空白格 · 全站视觉稿 · 静态高保真 · 建议 1440 视口查看</span>
+      <span>点击上方页签切换页面 · 右上角切换配色</span>
+    </footer>
+  </section>
+
+  <!-- ================= 目标 ================= -->
+  <section class="tab-panel on" data-panel="home">
+    <div class="page-hint"><span><b>目标</b> · COMMAND CENTER</span><span>动效稿 · 1440 视口 · 未改动站点代码</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <section class="hero">
+          <div>
+            <div class="eyebrow">COMMAND CENTER · 目标中枢</div>
+            <h1>今天，公司只需要<br><em>一个目标</em>。</h1>
+            <p class="lede">你提出目标，系统拆成工作流，分给最合适的部门，交付、质检、归档。你只需要判断：这件事值不值得做。</p>
+          </div>
+          <div class="composer">
+            <textarea spellcheck="false" placeholder="写下公司目标，例如：做一款 AI 记账 App，帮助自由职业者看清现金流"></textarea>
+            <div class="composer-foot">
+              <span class="knob">质量门槛 <b>85</b></span>
+              <span class="knob">自动拆解 <b>开</b></span>
+              <span class="knob">返工上限 <b>2</b></span>
+              <span class="grow"></span>
+              <span class="kbd">⌘</span><span class="kbd">↵</span>
+              <button class="btn primary">发布目标</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pulse">
+          <div class="m metric"><b>2<span>/2</span></b><small>目标 · 全部完成</small></div>
+          <div class="m metric"><b>16<span>/17</span></b><small>在岗成员</small></div>
+          <div class="m metric"><b>21.1<span>k</span></b><small>今日 TOKENS</small></div>
+          <div class="m metric"><b>92<span>分</span></b><small>平均质量</small></div>
+        </section>
+        <div class="ticker"><span class="dot on"></span>CEO 第 1 轮巡视完成 · <b>5 个部门，0 阻塞</b><span style="opacity:.4">·</span>最近归档 <b>14:02 验证动作与决策排序</b></div>
+
+        <div class="home-grid">
+          <div>
+            <div class="sec-head"><h2>目标生产线</h2><span class="more">共 2 个目标 · 全部归档</span></div>
+            <div class="lineage">
+              <article class="goal-row">
+                <div class="goal-id"><b>001</b>GOAL</div>
+                <div class="goal-main">
+                  <h3>AI 选题简报：为独立开发者找到 30 天可验证的内容选题</h3>
+                  <div class="goal-sub"><span class="badge ok"><span class="dot on"></span>已归档</span><span>创建 10-21</span><span>归档 10-26</span></div>
+                  <div class="goal-steps">
+                    <span class="gstep done">目标定稿</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">拆解工作流</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">部门交付</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">质检归档</span>
+                  </div>
+                </div>
+                <div class="goal-stats">
+                  <div class="gs"><b>4<em>/4</em></b><span>交付物</span></div>
+                  <div class="gs"><b>92</b><span>均分</span></div>
+                  <div class="gs"><b>9.9k</b><span>TOKENS</span></div>
+                </div>
+                <span class="row-arrow">→</span>
+              </article>
+
+              <article class="goal-row">
+                <div class="goal-id"><b>002</b>GOAL</div>
+                <div class="goal-main">
+                  <h3>AI 出海工具箱：从定价页到上线部署的完整清单</h3>
+                  <div class="goal-sub"><span class="badge ok"><span class="dot on"></span>已归档</span><span>创建 10-23</span><span>归档 10-26</span></div>
+                  <div class="goal-steps">
+                    <span class="gstep done">目标定稿</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">拆解工作流</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">部门交付</span><span class="gstep-sep">→</span>
+                    <span class="gstep done">质检归档</span>
+                  </div>
+                </div>
+                <div class="goal-stats">
+                  <div class="gs"><b>4<em>/4</em></b><span>交付物</span></div>
+                  <div class="gs"><b>92</b><span>均分</span></div>
+                  <div class="gs"><b>7.5k</b><span>TOKENS</span></div>
+                </div>
+                <span class="row-arrow">→</span>
+              </article>
+            </div>
+            <div class="sec-head" style="margin-top:24px"><h2>最新归档</h2><span class="more">质检通过 · 可直接阅读</span></div>
+            <div class="recent">
+              <article class="rcard">
+                <h4>验证动作与决策排序</h4>
+                <p class="rp">三个 30 天内可完成的验证动作，按需求强度、验证成本、可复用性排序。</p>
+                <div class="rm"><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span><span class="type-tag">PLAN</span><span class="score-pill">92</span></div>
+              </article>
+              <article class="rcard">
+                <h4>部署检查清单生成器</h4>
+                <p class="rp">读取 deploy.config.json，按环境输出检查清单，缺失项阻断部署。</p>
+                <div class="rm"><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span><span class="type-tag">CODE</span><span class="score-pill">92</span></div>
+              </article>
+              <article class="rcard">
+                <h4>公司运行周报 · 第 1 期</h4>
+                <p class="rp">2 个目标、8 项交付、9 份成果，平均质量 92，返工 0。</p>
+                <div class="rm"><span class="dept-tag" style="--dept:var(--dept-ops)">职能部</span><span class="type-tag">WEEKLY</span><span class="score-pill">95</span></div>
+              </article>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn sm">查看全部成果</button>
+              <button class="btn sm quiet">导出公司周报</button>
+              <span style="margin-left:auto;font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--text-faint);align-self:center">下一轮拆解 · 你写下目标后立即开始</span>
+            </div>
+          </div>
+
+          <aside>
+            <div class="rail-card">
+              <div class="rail-label">CEO · 统观全局</div>
+              <div class="ceo-line">
+                <span class="avatar">陆</span>
+                <div>
+                  <div class="ceo-name">陆知远</div>
+                  <div class="ceo-role">CEO · LEVEL_CEO</div>
+                </div>
+              </div>
+              <div class="ceo-note">第 1 轮巡视完成 · <b>5 个部门</b>无阻塞，1 项待你拍板「发布节奏终审」。</div>
+              <div class="mini-stats">
+                <div><b>17</b><span>成员</span></div>
+                <div><b>5</b><span>部门</span></div>
+                <div><b>1</b><span>待拍板</span></div>
+              </div>
+            </div>
+            <div class="rail-card">
+              <div class="rail-label">最近发生</div>
+              <div class="feed">
+                <div class="feed-item"><span class="feed-time">14:02</span><div><p><b>归档 4 份成果</b>，均分 92</p><span class="feed-dept" style="--dept:var(--dept-product)">产品部</span></div></div>
+                <div class="feed-item"><span class="feed-time">13:48</span><div><p><b>技术部完成 2 项交付</b>，无返工</p><span class="feed-dept" style="--dept:var(--dept-tech)">技术部</span></div></div>
+                <div class="feed-item"><span class="feed-time">13:20</span><div><p><b>质检通过 92 分</b>，高于门槛 7 分</p><span class="feed-dept">CEO 办公室</span></div></div>
+                <div class="feed-item"><span class="feed-time">11:05</span><div><p><b>目标拆解</b>为 2 条工作流、4 项交付</p><span class="feed-dept">陆知远</span></div></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>首屏从「输入框 + 空状态」改为编辑式版面：左侧说明公司如何运转，右侧直接发布目标。</li>
+          <li>目标列表变成「生产线」行：四步状态、交付数、均分、tokens 一次读完，不用点进去才知道进度。</li>
+          <li>新增 CEO 巡视与实时动态侧栏，让「谁在统观全局、最近发生了什么」始终可见。</li>
+          <li>顶栏「▶ 播放施工过程」会现场敲下一条新目标并发布：输入框逐字写出 → 按钮呼吸 → 生产线立刻多出一行「施工中」，指标与滚动条同步改写。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>目标列表用这种「行式生产线」（密度高、易扫读），还是卡片网格（每个目标更突出、但一屏只能放 2 个）？</p>
+        <div class="ask-opts"><span class="hot">行式生产线</span><span>卡片网格</span><span>混合：最近的用卡片</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 项目详情 ================= -->
+  <section class="tab-panel" data-panel="goal">
+    <div class="page-hint"><span><b>项目详情</b> · GOAL 001</span><span>四步生产线 · 部门交付 · 质量契约</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <div class="crumb">目标 / <b>GOAL 001</b></div>
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">GOAL 001 · DONE</div>
+            <h1>AI 选题简报：为独立开发者找到<br>30 天可验证的内容选题</h1>
+            <p class="sub">创建 10-21 09:12 · 归档 10-26 14:02 · 2 条工作流 · 4 项交付 · 4 份成果</p>
+          </div>
+          <div class="head-actions"><button class="btn sm">返工</button><button class="btn sm primary">导出 ZIP</button></div>
+        </div>
+
+        <div class="pipeline">
+          <div class="pstep done"><span class="pnum">01</span><b>目标定稿</b><small>10-21 09:12</small></div>
+          <div class="pstep done"><span class="pnum">02</span><b>拆解工作流</b><small>10-21 09:20 · 2 条</small></div>
+          <div class="pstep done"><span class="pnum">03</span><b>部门交付</b><small>10-26 13:48 · 4 项</small></div>
+          <div class="pstep done"><span class="pnum">04</span><b>质检归档</b><small>10-26 14:02 · 92 分</small></div>
+        </div>
+
+        <div class="detail-grid">
+          <div>
+            <div class="sec-head"><h2>部门交付</h2><span class="more">按工作流分组 · 2 条</span></div>
+
+            <section class="ws">
+              <header class="ws-head">
+                <span class="ws-dot" style="--dept:var(--dept-product)"></span>
+                <h3>产品部</h3>
+                <span class="ws-lead">苏黎 · 产品策略</span>
+                <div class="ws-meta"><span class="badge ok">已交付</span></div>
+              </header>
+              <div class="dv">
+                <span class="dv-idx">01</span>
+                <div>
+                  <h4>选题清单与竞品分析</h4>
+                  <div class="dv-meta"><span class="type-tag">REPORT</span><span>产出 1 份成果</span><span>10-26 11:20</span></div>
+                </div>
+                <span class="score-pill">92</span>
+                <span class="arrow">→</span>
+              </div>
+              <div class="dv">
+                <span class="dv-idx">02</span>
+                <div>
+                  <h4>验证动作与决策排序</h4>
+                  <div class="dv-meta"><span class="type-tag">PLAN</span><span>产出 1 份成果</span><span>10-26 14:02</span></div>
+                </div>
+                <span class="score-pill">92</span>
+                <span class="arrow">→</span>
+              </div>
+            </section>
+
+            <section class="ws">
+              <header class="ws-head">
+                <span class="ws-dot" style="--dept:var(--dept-tech)"></span>
+                <h3>技术部</h3>
+                <span class="ws-lead">陈序 · 技术架构</span>
+                <div class="ws-meta"><span class="badge ok">已交付</span></div>
+              </header>
+              <div class="dv">
+                <span class="dv-idx">01</span>
+                <div>
+                  <h4>部署检查清单生成器</h4>
+                  <div class="dv-meta"><span class="type-tag">CODE</span><span>产出 1 份成果</span><span>10-26 13:31</span></div>
+                </div>
+                <span class="score-pill">92</span>
+                <span class="arrow">→</span>
+              </div>
+              <div class="dv">
+                <span class="dv-idx">02</span>
+                <div>
+                  <h4>上线前遗漏配置检查</h4>
+                  <div class="dv-meta"><span class="type-tag">REPORT</span><span>产出 1 份成果</span><span>10-26 13:48</span></div>
+                </div>
+                <span class="score-pill">92</span>
+                <span class="arrow">→</span>
+              </div>
+            </section>
+
+            <div class="sec-head" style="margin-top:24px"><h2>质检记录</h2><span class="more">自动评审 · 4 次全部通过</span></div>
+            <section class="ws">
+              <div class="dv" style="grid-template-columns:24px minmax(0,1fr) auto;">
+                <span class="dv-idx">✓</span>
+                <div>
+                  <h4>选题清单与竞品分析 · 首次评审通过</h4>
+                  <div class="dv-meta"><span>结构完整、竞品数据有来源、结论可执行</span></div>
+                </div>
+                <span class="badge ok">92 / 85</span>
+              </div>
+              <div class="dv" style="grid-template-columns:24px minmax(0,1fr) auto;">
+                <span class="dv-idx">✓</span>
+                <div>
+                  <h4>验证动作与决策排序 · 首次评审通过</h4>
+                  <div class="dv-meta"><span>优先级排序有依据、验证成本明确</span></div>
+                </div>
+                <span class="badge ok">92 / 85</span>
+              </div>
+              <div class="dv" style="grid-template-columns:24px minmax(0,1fr) auto;">
+                <span class="dv-idx">✓</span>
+                <div>
+                  <h4>部署检查清单生成器 · 首次评审通过</h4>
+                  <div class="dv-meta"><span>可直接运行、边界条件覆盖</span></div>
+                </div>
+                <span class="badge ok">92 / 85</span>
+              </div>
+            </section>
+          </div>
+
+          <aside>
+            <div class="aside-card">
+              <div class="rail-label">项目摘要</div>
+              <div class="donut-wrap">
+                <div class="donut"><b>100<em>%</em></b></div>
+                <div class="donut-side"><b>4 / 4 交付完成</b><span>2 条工作流 · 4 份成果<br>历时 5 天 4 小时</span></div>
+              </div>
+            </div>
+
+            <div class="aside-card">
+              <div class="rail-label">质量契约</div>
+              <div class="qrow"><span>平均得分</span><b class="ok">92</b></div>
+              <div class="qrow"><span>质量门槛</span><b>85</b></div>
+              <div class="qrow"><span>返工次数</span><b>0</b></div>
+              <div class="qrow"><span>消耗 tokens</span><b>9,874</b></div>
+            </div>
+
+            <div class="aside-card">
+              <div class="rail-label">部门投入</div>
+              <div class="bars">
+                <div class="bar-row"><div class="bar-top"><b>产品部</b><span>5,214 tokens</span></div><div class="bar" style="--dept:var(--dept-product)"><i style="width:53%"></i></div></div>
+                <div class="bar-row"><div class="bar-top"><b>技术部</b><span>4,660 tokens</span></div><div class="bar" style="--dept:var(--dept-tech)"><i style="width:47%"></i></div></div>
+              </div>
+            </div>
+
+            <div class="aside-card">
+              <div class="rail-label">最近动态</div>
+              <div class="feed">
+                <div class="feed-item"><span class="feed-time">14:02</span><div><p><b>归档 4 份成果</b>，均分 92</p><span class="feed-dept">CEO 办公室</span></div></div>
+                <div class="feed-item"><span class="feed-time">13:48</span><div><p><b>技术部完成交付</b>，无返工</p><span class="feed-dept" style="--dept:var(--dept-tech)">陈序</span></div></div>
+                <div class="feed-item"><span class="feed-time">11:20</span><div><p><b>产品部提交 2 份成果</b></p><span class="feed-dept" style="--dept:var(--dept-product)">苏黎</span></div></div>
+                <div class="feed-item"><span class="feed-time">09:20</span><div><p><b>拆解为 2 条工作流</b></p><span class="feed-dept">陆知远</span></div></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>把百分比进度换成四步生产线，任何时候都能看出「现在卡在哪个部门」。</li>
+          <li>交付物按部门成组，行内直接显示类型、分数、成果数与完成时间，返工与质检记录同页可查。</li>
+          <li>右侧项目摘要固定：完成度、质量契约、部门投入、最近动态，滚动时不丢上下文。</li>
+          <li>顶栏「▶ 播放施工过程」会把这条目标从头重放一遍：拆解 → 分派 → 交付逐条落地 → 质检打分 → 归档，哪一步在亮就是当时卡在哪。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>交付物行尾是直接放「⋯」菜单（返工 / 重派 / 查看），还是点开行内展开？我倾向「⋯」，避免误触返工。</p>
+        <div class="ask-opts"><span class="hot">行尾 ⋯ 菜单</span><span>展开后显示</span><span>只做查看，返工去详情</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 组织 ================= -->
+  <section class="tab-panel" data-panel="org">
+    <div class="page-hint"><span><b>组织</b> · ORGANIZATION</span><span>17 人 · 5 个部门 · 负责人自动补位</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">ORGANIZATION · 17 人</div>
+            <h1>一家公司，17 个位置。</h1>
+            <p class="sub">CEO 统观全局，五位负责人各守一个部门，成员只做一件具体的事。新部门会自动补一位负责人，再由你点亮岗位。</p>
+          </div>
+          <div class="head-actions"><button class="btn sm">＋ 部门</button><button class="btn sm">添一格</button><button class="btn sm primary">刷新</button></div>
+        </div>
+
+        <div class="org-toolbar">
+          <div class="org-badge">
+            <span>在岗 <b>16 / 16</b></span>
+            <span>部门 <b>5</b></span>
+            <span>待拍板 <b>0</b></span>
+            <span>平均质量 <b>92</b></span>
+          </div>
+          <button class="btn sm quiet">按层级</button>
+          <button class="btn sm quiet">按部门</button>
+        </div>
+
+        <div class="org-scroll">
+          <div class="org-inner">
+            <div class="org-ceo">
+              <div class="ceo-card">
+                <span class="avatar xl">陆</span>
+                <div>
+                  <div class="ceo-name">陆知远</div>
+                  <div class="ceo-role">CEO · 统观全局</div>
+                </div>
+                <span class="ceo-pill">第 1 轮巡视 · 5 部门 0 阻塞</span>
+              </div>
+            </div>
+            <div class="org-trunk"></div>
+            <div class="org-branches">
+
+              <div class="dept-col">
+                <div class="dept-head"><span class="d" style="--dept:var(--dept-product)"></span><h3>产品部</h3><span class="cnt">3</span><span class="add">＋</span></div>
+                <div class="emp lead" style="--dept:var(--dept-product)">
+                  <div class="emp-top"><span class="emp-name">苏黎</span><span class="badge lead">负责人</span></div>
+                  <div class="emp-role">产品策略 · 选题论证</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 2 · 累计 11</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-product)">
+                  <div class="emp-top"><span class="emp-name">顾清</span></div>
+                  <div class="emp-role">用户研究 · 访谈与竞品</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 8</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-product)">
+                  <div class="emp-top"><span class="emp-name">沈聿</span></div>
+                  <div class="emp-role">数据分析 · 验证指标</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 6</span></div>
+                </div>
+              </div>
+
+              <div class="dept-col">
+                <div class="dept-head"><span class="d" style="--dept:var(--dept-tech)"></span><h3>技术部</h3><span class="cnt">4</span><span class="add">＋</span></div>
+                <div class="emp lead" style="--dept:var(--dept-tech)">
+                  <div class="emp-top"><span class="emp-name">陈序</span><span class="badge lead">负责人</span></div>
+                  <div class="emp-role">技术架构 · 交付可行性</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 2 · 累计 13</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-tech)">
+                  <div class="emp-top"><span class="emp-name">许南</span></div>
+                  <div class="emp-role">后端工程 · 生成器实现</div>
+                  <div class="emp-foot"><i class="dot run"></i>执行中<span class="emp-nums">今日 2 · 累计 9</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-tech)">
+                  <div class="emp-top"><span class="emp-name">叶舟</span></div>
+                  <div class="emp-role">前端工程 · 清单界面</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 7</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-tech)">
+                  <div class="emp-top"><span class="emp-name">江迟</span></div>
+                  <div class="emp-role">AI 工程 · 评审与提示词</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 10</span></div>
+                </div>
+              </div>
+
+              <div class="dept-col">
+                <div class="dept-head"><span class="d" style="--dept:var(--dept-design)"></span><h3>设计部</h3><span class="cnt">2</span><span class="add">＋</span></div>
+                <div class="emp lead" style="--dept:var(--dept-design)">
+                  <div class="emp-top"><span class="emp-name">林深</span><span class="badge lead">负责人</span></div>
+                  <div class="emp-role">体验设计 · 信息结构</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 8</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-design)">
+                  <div class="emp-top"><span class="emp-name">温言</span></div>
+                  <div class="emp-role">视觉设计 · 版式与图表</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 5</span></div>
+                </div>
+              </div>
+
+              <div class="dept-col">
+                <div class="dept-head"><span class="d" style="--dept:var(--dept-market)"></span><h3>市场部</h3><span class="cnt">3</span><span class="add">＋</span></div>
+                <div class="emp lead" style="--dept:var(--dept-market)">
+                  <div class="emp-top"><span class="emp-name">周野</span><span class="badge lead">负责人</span></div>
+                  <div class="emp-role">增长策略 · 渠道计划</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 2 · 累计 12</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-market)">
+                  <div class="emp-top"><span class="emp-name">白露</span></div>
+                  <div class="emp-role">内容策略 · 发布节奏</div>
+                  <div class="emp-foot"><i class="dot run"></i>执行中<span class="emp-nums">今日 3 · 累计 10</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-market)">
+                  <div class="emp-top"><span class="emp-name">程野</span></div>
+                  <div class="emp-role">渠道运营 · 种子用户</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 6</span></div>
+                </div>
+              </div>
+
+              <div class="dept-col">
+                <div class="dept-head"><span class="d" style="--dept:var(--dept-ops)"></span><h3>职能部</h3><span class="cnt">4</span><span class="add">＋</span></div>
+                <div class="emp lead" style="--dept:var(--dept-ops)">
+                  <div class="emp-top"><span class="emp-name">何静</span><span class="badge lead">负责人</span></div>
+                  <div class="emp-role">运营 · 巡视与归档</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 2 · 累计 14</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-ops)">
+                  <div class="emp-top"><span class="emp-name">唐棠</span></div>
+                  <div class="emp-role">财务 · 成本核算</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 5</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-ops)">
+                  <div class="emp-top"><span class="emp-name">宋知</span></div>
+                  <div class="emp-role">法务 · 合规检查</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 4</span></div>
+                </div>
+                <div class="emp" style="--dept:var(--dept-ops)">
+                  <div class="emp-top"><span class="emp-name">罗一</span></div>
+                  <div class="emp-role">行政 · 数据备份</div>
+                  <div class="emp-foot"><i class="dot on"></i>在岗<span class="emp-nums">今日 1 · 累计 3</span></div>
+                </div>
+              </div>
+
+            </div>
+            <div class="org-strip">
+              <span><b>16 / 16</b>在岗</span>
+              <span><b>5</b>部门</span>
+              <span><b>0</b>待拍板</span>
+              <span><b>1</b>轮巡视</span>
+              <span style="margin-left:auto">新部门将自动补 1 位负责人 · 其余岗位由你点亮</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>CEO 独立置顶，五个部门纵向列，负责人固定在列首，层级与归属一眼可读。</li>
+          <li>成员卡补上「今日 / 累计」工作量与在岗 / 执行中状态，不只看头衔，也看谁真的在干活。</li>
+          <li>窄屏保持 0.72 最小缩放并横向居中，不再把组织图缩成一团不可读的小字。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>组织图继续用「树状分支」（层级强、适合现在 17 人），还是改成「部门纵列 + 右侧人员检查器」（空间更大、人多时更从容）？</p>
+        <div class="ask-opts"><span class="hot">树状分支</span><span>纵列 + 检查器</span><span>两者切换</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 看板 ================= -->
+  <section class="tab-panel" data-panel="board">
+    <div class="page-hint"><span><b>看板</b> · OPERATIONS BOARD</span><span>实时事件 · 任务泳道 · CEO 巡视</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">OPERATIONS · 今日</div>
+            <h1>所有正在发生的事。</h1>
+            <p class="sub">任务从目标拆出来，落在具体的人身上。你只需要看哪里堵住、哪里需要拍板，其余交给组织。</p>
+          </div>
+          <div class="head-actions"><button class="btn sm">全部任务</button><button class="btn sm primary">＋ 派发任务</button></div>
+        </div>
+
+        <section class="ops">
+          <div class="m metric"><b>2</b><small>执行中</small></div>
+          <div class="m metric"><b>19</b><small>今日完成</small></div>
+          <div class="m metric"><b>21.1<span>k</span></b><small>今日 TOKENS</small></div>
+          <div class="m metric"><b>0</b><small>失败 / 超时</small></div>
+          <div class="tour">
+            <div class="tour-line"><span class="dot on"></span><b>CEO 巡视 · 第 1 轮</b><span>14:10</span></div>
+            <div class="tour-note">5 个部门已巡视，0 阻塞；1 项待你拍板「30 天发布节奏终审」。</div>
+          </div>
+        </section>
+
+        <div class="cmdbar">
+          <p>直接把任务交给某个部门，例如「补一版定价页的竞品对比」</p>
+          <span class="select">产品部 <span style="color:var(--text-faint);font-size:8px">▾</span></span>
+          <button class="btn sm primary">派发</button>
+        </div>
+
+        <div class="board-grid">
+          <div class="lanes">
+
+            <section class="lane">
+              <header class="lane-head"><span class="dot"></span><h3>待执行</h3><span class="n">3</span></header>
+              <div class="lane-body">
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#133</span><span class="dept-tag" style="--dept:var(--dept-market)">市场部</span></div>
+                  <h4>撰写「30 天内容节奏」第二稿</h4>
+                  <div class="task-foot"><span class="who">白露 · 内容策略</span><span>10:20 创建</span></div>
+                </article>
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#134</span><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span></div>
+                  <h4>校验部署检查清单的边界条件</h4>
+                  <div class="task-foot"><span class="who">许南 · 后端工程</span><span>10:42 创建</span></div>
+                </article>
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#135</span><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span></div>
+                  <h4>补全竞品价格页的信息缺口</h4>
+                  <div class="task-foot"><span class="who">顾清 · 用户研究</span><span>11:05 创建</span></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="lane">
+              <header class="lane-head"><span class="dot run"></span><h3>执行中</h3><span class="n">2</span></header>
+              <div class="lane-body">
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#131</span><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span></div>
+                  <h4>生成选题清单 v2 · 补 3 个赛道</h4>
+                  <div class="task-foot"><span class="who"><span class="avatar sm" style="width:16px;height:16px;font-size:7px">苏</span>苏黎</span><span class="badge run">尝试 1 / 2</span></div>
+                </article>
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#132</span><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span></div>
+                  <h4>部署检查清单生成器 · 加 CI 模板</h4>
+                  <div class="task-foot"><span class="who"><span class="avatar sm" style="width:16px;height:16px;font-size:7px">陈</span>陈序</span><span class="badge run">尝试 1 / 2</span></div>
+                </article>
+                <div style="padding:10px 4px;font-size:9px;color:var(--text-faint);letter-spacing:.04em;line-height:1.8">
+                  正在生成内容 · <span class="msweep" style="display:inline-block;width:52px;vertical-align:middle"></span>
+                </div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <header class="lane-head"><span class="dot on"></span><h3>已完成</h3><span class="n">19</span></header>
+              <div class="lane-body">
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#129</span><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span></div>
+                  <h4>验证动作与决策排序</h4>
+                  <div class="task-foot"><span class="who">苏黎 · 14:02</span><span class="score-pill">92</span></div>
+                </article>
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#130</span><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span></div>
+                  <h4>选题清单与竞品分析</h4>
+                  <div class="task-foot"><span class="who">苏黎 · 11:20</span><span class="score-pill">92</span></div>
+                </article>
+                <article class="task">
+                  <div class="task-top"><span class="task-id">#128</span><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span></div>
+                  <h4>上线前遗漏配置检查</h4>
+                  <div class="task-foot"><span class="who">陈序 · 13:48</span><span class="score-pill">92</span></div>
+                </article>
+                <div style="padding:8px 4px;font-family:var(--font-mono);font-size:9px;color:var(--text-faint)">还有 16 项 · 查看全部 →</div>
+              </div>
+            </section>
+
+            <section class="lane">
+              <header class="lane-head"><span class="dot err"></span><h3>需复核</h3><span class="n">1</span></header>
+              <div class="lane-body">
+                <article class="task" style="border-color:var(--accent-dim)">
+                  <div class="task-top"><span class="task-id">#136</span><span class="dept-tag" style="--dept:var(--dept-market)">市场部</span></div>
+                  <h4>30 天发布节奏终审</h4>
+                  <div class="task-foot"><span class="who">周野 · 待拍板</span><span class="badge run">90 / 85</span></div>
+                </article>
+                <div style="margin-top:4px;padding:11px;border:1px dashed var(--line-strong);border-radius:9px;font-size:9px;line-height:1.8;color:var(--text-faint)">
+                  质检已通过，但需创始人确认渠道优先级后再归档。
+                </div>
+              </div>
+            </section>
+
+          </div>
+
+          <aside class="live-card">
+            <div class="live-head"><h3>实时动态</h3><span class="dot run"></span></div>
+            <div class="live-item"><time>14:10</time><div><p><b>CEO 完成第 1 轮巡视</b>，0 阻塞</p><span class="who">陆知远 · 统观全局</span></div></div>
+            <div class="live-item"><time>14:02</time><div><p><b>归档成果</b> 验证动作与决策排序 <span class="score-pill" style="font-size:8px;padding:0 4px">92</span></p><span class="who">产品部 · 苏黎</span></div></div>
+            <div class="live-item"><time>13:48</time><div><p><b>技术部完成 2 项交付</b>，无返工</p><span class="who">技术部 · 陈序</span></div></div>
+            <div class="live-item"><time>13:31</time><div><p><b>生成器通过边界测试</b>，覆盖 18 种环境</p><span class="who">技术部 · 许南</span></div></div>
+            <div class="live-item"><time>11:05</time><div><p><b>目标拆解完成</b>，生成 2 条工作流</p><span class="who">CEO 办公室</span></div></div>
+          </aside>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>顶部运行带合并四个关键指标与 CEO 巡视：先判断公司健不健康，再看具体任务。</li>
+          <li>四列泳道带部门色标、尝试次数与评分，卡片只保留做决定需要的信息。</li>
+          <li>右侧实时动态常驻，WebSocket 事件不再被折叠进角落；「需复核」独立成列，等你拍板的事不会沉底。</li>
+          <li>看板是活的：执行中的卡片带进度条，任务完成后整张卡搬到「已完成」并当场盖章打分，右侧动态同时补一条。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>看板按「任务状态」分列（现在这版），还是按「部门泳道」分列？前者看流程，后者看谁忙谁闲。</p>
+        <div class="ask-opts"><span class="hot">按状态</span><span>按部门</span><span>状态 + 部门色标</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 成果 ================= -->
+  <section class="tab-panel" data-panel="artifacts">
+    <div class="page-hint"><span><b>成果</b> · ARTIFACT LIBRARY</span><span>9 份成果 · 列表 + 常驻阅读面板</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">LIBRARY · 9 ARTIFACTS</div>
+            <h1>成果，是公司唯一的输出。</h1>
+            <p class="sub">每份成果都带部门、类型、质检分数和消耗。先读，再决定要不要返工——而不是先相信。</p>
+          </div>
+          <div class="head-actions">
+            <span class="knob" style="padding:7px 12px">⌕ 搜索标题或正文</span>
+            <button class="btn sm primary">导出全部 ZIP</button>
+          </div>
+        </div>
+
+        <div class="art-grid">
+          <aside class="filter">
+            <div class="fgroup">
+              <h4>全部</h4>
+              <div class="flist"><label class="on"><span>所有成果</span><span class="c">9</span></label></div>
+            </div>
+            <div class="fgroup">
+              <h4>部门</h4>
+              <div class="flist">
+                <label><span>产品部</span><span class="c">3</span></label>
+                <label><span>技术部</span><span class="c">2</span></label>
+                <label><span>设计部</span><span class="c">1</span></label>
+                <label><span>市场部</span><span class="c">2</span></label>
+                <label><span>职能部</span><span class="c">1</span></label>
+              </div>
+            </div>
+            <div class="fgroup">
+              <h4>类型</h4>
+              <div class="flist">
+                <label><span>方案</span><span class="c">2</span></label>
+                <label><span>报告</span><span class="c">3</span></label>
+                <label><span>文档</span><span class="c">1</span></label>
+                <label><span>代码</span><span class="c">1</span></label>
+                <label><span>计划</span><span class="c">1</span></label>
+                <label><span>周报</span><span class="c">1</span></label>
+              </div>
+            </div>
+            <div class="fgroup">
+              <h4>评分</h4>
+              <div class="flist">
+                <label><span>95 及以上</span><span class="c">1</span></label>
+                <label><span>90 – 94</span><span class="c">7</span></label>
+                <label><span>85 – 89</span><span class="c">1</span></label>
+              </div>
+            </div>
+          </aside>
+
+          <div class="art-list">
+            <article class="arow" data-art="1">
+              <h4>验证动作与决策排序</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span><span class="type-tag">PLAN</span><span>10-26</span><span class="score-pill">92</span></div>
+            </article>
+            <article class="arow" data-art="2">
+              <h4>选题清单与竞品分析</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span><span class="type-tag">REPORT</span><span>10-26</span><span class="score-pill">92</span></div>
+            </article>
+            <article class="arow" data-art="3">
+              <h4>AI 出海工具箱 PRD</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-product)">产品部</span><span class="type-tag">DOC</span><span>10-22</span><span class="score-pill">94</span></div>
+            </article>
+            <article class="arow" data-art="4">
+              <h4>30 天发布节奏与渠道计划</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-market)">市场部</span><span class="type-tag">PLAN</span><span>10-24</span><span class="score-pill">90</span></div>
+            </article>
+            <article class="arow" data-art="5">
+              <h4>部署检查清单生成器</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span><span class="type-tag">CODE</span><span>10-26</span><span class="score-pill">92</span></div>
+            </article>
+            <article class="arow" data-art="6">
+              <h4>上线前遗漏配置检查</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-tech)">技术部</span><span class="type-tag">REPORT</span><span>10-26</span><span class="score-pill">92</span></div>
+            </article>
+            <article class="arow" data-art="7">
+              <h4>定价页信息架构</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-design)">设计部</span><span class="type-tag">SCHEMA</span><span>10-23</span><span class="score-pill">88</span></div>
+            </article>
+            <article class="arow" data-art="8">
+              <h4>首批 20 位种子用户名单</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-market)">市场部</span><span class="type-tag">LIST</span><span>10-23</span><span class="score-pill">86</span></div>
+            </article>
+            <article class="arow" data-art="9">
+              <h4>公司运行周报 · 第 1 期</h4>
+              <div class="am"><span class="dept-tag" style="--dept:var(--dept-ops)">职能部</span><span class="type-tag">WEEKLY</span><span>10-25</span><span class="score-pill">95</span></div>
+            </article>
+          </div>
+
+          <div class="reader" data-reader>
+            <div class="reader-head">
+              <div class="rd-eyebrow">GOAL 001 · 产品部 · PLAN</div>
+              <h2 class="rd-title">验证动作与决策排序</h2>
+              <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-product)">苏黎</span><span>10-26 14:02</span><span class="score-pill" style="margin-left:auto">92</span></div>
+            </div>
+            <div class="reader-body">
+              <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>92 / 85 · 通过</span></div><p>结构清楚，验证成本与判断标准都落到可执行粒度；建议在第二轮补一个失败退出条件。</p></div>
+              <p class="rd-p">本方案把「选题是否值得做」拆成三个可在 30 天内完成的验证动作，并按<b>需求强度、验证成本、可复用性</b>排序，避免在低价值方向上消耗产能。</p>
+              <h3 class="rd-h">一、先验证什么</h3>
+              <table class="rd-table">
+                <thead><tr><th>动作</th><th>成本</th><th>判断标准</th></tr></thead>
+                <tbody>
+                  <tr><td>5 场开发者访谈</td><td>3 天</td><td>≥ 3 人主动追问「什么时候能用」</td></tr>
+                  <tr><td>落地页 + 等候名单</td><td>1 天</td><td>7 天转化 ≥ 8%</td></tr>
+                  <tr><td>竞品定价页对比</td><td>2 天</td><td>找到 ≥ 2 个可攻击的价格空档</td></tr>
+                </tbody>
+              </table>
+              <p class="rd-p"><strong>决策排序：</strong>先做落地页验证需求强度，再做访谈补定性证据，最后用竞品对比确定切入角度。三个动作可并行，但判断标准必须独立记录。</p>
+              <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,204 tokens</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>三栏结构：172px 筛选、中间成果列表、右侧常驻阅读面板。点选即读，不再每次弹抽屉。</li>
+          <li>阅读面板用衬线正文 + 92 分质检条，先让「这份成果值不值」被看见，再谈操作。</li>
+          <li>列表预览做了 Markdown 清洗，表格线、井号与竖线噪声不再混进摘要。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>阅读面板固定在右侧（像刊物，切换成本低），还是点开全屏抽屉（正文更宽、适合长文）？</p>
+        <div class="ask-opts"><span class="hot">右侧常驻</span><span>全屏抽屉</span><span>右侧 + 可展开</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ================= 设置 ================= -->
+  <section class="tab-panel" data-panel="settings">
+    <div class="page-hint"><span><b>设置</b> · SETTINGS</span><span>模型 · 质量 · 权限 · 备份</span></div>
+    <div class="app">
+      <div class="app-bg"></div>
+      <div class="appbody">
+
+        <div class="page-head">
+          <div>
+            <div class="eyebrow">SETTINGS · WORKSPACE</div>
+            <h1>把公司的规则，写清楚。</h1>
+            <p class="sub">模型、质量门槛、访问与备份——四件事决定这家公司能跑多稳。改动立即生效。</p>
+          </div>
+          <div class="head-actions"><button class="btn sm">恢复默认</button><button class="btn sm primary">保存</button></div>
+        </div>
+
+        <div class="set-grid">
+          <nav class="set-nav">
+            <a class="on">模型服务</a>
+            <a>质量与目标</a>
+            <a>公司与权限</a>
+            <a>数据与备份</a>
+          </nav>
+
+          <div class="set-main">
+
+            <section class="set-card">
+              <div class="set-card-head">
+                <div><h3>模型服务</h3><p>主用负责日常产出，备用在主用不可用时接管</p></div>
+                <span class="badge ok"><span class="dot on"></span>主用在线</span>
+              </div>
+              <div class="set-body">
+                <div class="model-row">
+                  <span class="model-ico">MK</span>
+                  <div class="model-main"><b>本地 Mock 引擎</b><span>127.0.0.1:8799 · 平均响应 12ms · 不消耗额度</span></div>
+                  <span class="badge ok">主用</span>
+                  <span class="togg on"></span>
+                </div>
+                <div class="model-row">
+                  <span class="model-ico">GLM</span>
+                  <div class="model-main"><b>智谱 GLM-4.6</b><span>令牌已过期 · 上次成功调用 10-18 09:20</span></div>
+                  <span class="badge err">令牌过期</span>
+                  <button class="btn sm">更新令牌</button>
+                </div>
+                <div class="model-row">
+                  <span class="model-ico">API</span>
+                  <div class="model-main"><b>自定义 OpenAI 兼容</b><span>未配置 · 支持任意兼容端点</span></div>
+                  <span class="badge">未启用</span>
+                  <button class="btn sm quiet">配置</button>
+                </div>
+              </div>
+              <div class="tip">令牌只保存在本机 <b>data/settings.json</b>，不会写入成果、日志或导出包。切换主备不需要重启。</div>
+            </section>
+
+            <section class="set-card">
+              <div class="set-card-head">
+                <div><h3>质量与目标</h3><p>决定什么算「交付完成」，以及不合格时怎么返工</p></div>
+                <span class="badge">自动评审已开启</span>
+              </div>
+              <div class="set-body">
+                <div class="set-row">
+                  <div class="lbl"><b>质量门槛</b><span>低于该分数的成果会自动返工，不会进入归档</span></div>
+                  <div class="ctl"><div class="slider"><div class="track"><div class="fill"></div><div class="knob2"></div></div><b>85</b></div></div>
+                </div>
+                <div class="set-row">
+                  <div class="lbl"><b>返工上限</b><span>超过上限仍不达标，任务进入「需复核」等你拍板</span></div>
+                  <div class="ctl"><div class="stepper"><span>−</span><b>2</b><span>＋</span></div></div>
+                </div>
+                <div class="set-row">
+                  <div class="lbl"><b>目标自动拆解</b><span>发布目标后立即拆成工作流并分配部门</span></div>
+                  <div class="ctl"><span class="togg on"></span></div>
+                </div>
+                <div class="set-row">
+                  <div class="lbl"><b>CEO 定时巡视</b><span>每轮检查阻塞、返工与待拍板事项，并写入动态</span></div>
+                  <div class="ctl"><span class="togg on"></span></div>
+                </div>
+                <div class="set-row">
+                  <div class="lbl"><b>通过后自动归档</b><span>达标成果直接进入成果库，无需人工确认</span></div>
+                  <div class="ctl"><span class="togg on"></span></div>
+                </div>
+              </div>
+              <div class="tip">当前门槛 <b>85</b> · 最近 30 天平均 <b>92</b>，返工率 <b>0%</b>。门槛过低会让成果失去区分度，建议保持在 82–88。</div>
+            </section>
+
+            <div class="set2">
+              <section class="set-card">
+                <div class="set-card-head"><div><h3>公司与权限</h3><p>访问与品牌信息</p></div></div>
+                <div class="set-body">
+                  <div class="set-row"><div class="lbl"><b>公司名称</b><span>无锡空白格人工智能科技有限公司</span></div><button class="btn sm quiet">修改</button></div>
+                  <div class="set-row"><div class="lbl"><b>访问口令</b><span>已启用 · 最近登录 10-26 14:20</span></div><span class="badge ok">已启用</span></div>
+                  <div class="set-row"><div class="lbl"><b>默认导出</b><span>Markdown + ZIP 包</span></div><span class="badge">MD · ZIP</span></div>
+                </div>
+              </section>
+
+              <section class="set-card">
+                <div class="set-card-head"><div><h3>数据与备份</h3><p>本地文件，随时可迁走</p></div><span class="badge ok">正常</span></div>
+                <div class="set-body">
+                  <div class="set-row"><div class="lbl"><b>数据库</b><span>H2 本地文件 · data/aione</span></div><span class="type-tag">28.4 MB</span></div>
+                  <div class="set-row"><div class="lbl"><b>最近备份</b><span>10-26 02:00 · 自动 · 28.4 MB</span></div><button class="btn sm">立即备份</button></div>
+                  <div class="set-row"><div class="lbl"><b>导出全部成果</b><span>9 份成果 · 含质检记录</span></div><button class="btn sm quiet">导出</button></div>
+                </div>
+              </section>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <section class="spec">
+      <div>
+        <div class="spec-label">本页改动要点</div>
+        <ul>
+          <li>左侧分组导航 + 右侧单列卡片，长设置页不再一条道滚到底。</li>
+          <li>模型服务直接显示连接状态、响应时间与主备关系，令牌过期在页面上就能看见。</li>
+          <li>质量门槛用滑杆并给出解释与近期数据，返工上限、自动拆解、巡视放在同一组。</li>
+        </ul>
+      </div>
+      <div class="ask">
+        <div class="spec-label">需要你拍板</div>
+        <p>设置页是否需要「高级模式」折叠原始参数（温度、并发、超时、提示词）？普通视图只保留质量与开关，会更干净。</p>
+        <div class="ask-opts"><span class="hot">需要高级模式</span><span>只保留常用项</span><span>暂不开放</span></div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ===== 成果阅读模板 ===== -->
+  <template id="art-tpl-1">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 001 · 产品部 · PLAN</div>
+      <h2 class="rd-title">验证动作与决策排序</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-product)">苏黎</span><span>10-26 14:02</span><span class="score-pill" style="margin-left:auto">92</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>92 / 85 · 通过</span></div><p>结构清楚，验证成本与判断标准都落到可执行粒度；建议在第二轮补一个失败退出条件。</p></div>
+      <p class="rd-p">本方案把「选题是否值得做」拆成三个可在 30 天内完成的验证动作，并按<b>需求强度、验证成本、可复用性</b>排序，避免在低价值方向上消耗产能。</p>
+      <h3 class="rd-h">一、先验证什么</h3>
+      <table class="rd-table">
+        <thead><tr><th>动作</th><th>成本</th><th>判断标准</th></tr></thead>
+        <tbody>
+          <tr><td>5 场开发者访谈</td><td>3 天</td><td>≥ 3 人主动追问「什么时候能用」</td></tr>
+          <tr><td>落地页 + 等候名单</td><td>1 天</td><td>7 天转化 ≥ 8%</td></tr>
+          <tr><td>竞品定价页对比</td><td>2 天</td><td>找到 ≥ 2 个可攻击的价格空档</td></tr>
+        </tbody>
+      </table>
+      <h3 class="rd-h">二、决策排序</h3>
+      <p class="rd-p"><strong>1 · 需求强度</strong>　先做落地页，成本最低、信号最快。若 7 天转化低于 4%，直接停止该方向。</p>
+      <p class="rd-p"><strong>2 · 定性证据</strong>　访谈只验证「为什么」，不负责发现「有没有」。问题聚焦最近一次真实的付费或放弃。</p>
+      <p class="rd-p"><strong>3 · 切入角度</strong>　竞品对比用来找空档，不作为需求证据。价格空档必须同时满足「有人抱怨」与「有人已付费」。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,204 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-2">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 001 · 产品部 · REPORT</div>
+      <h2 class="rd-title">选题清单与竞品分析</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-product)">苏黎</span><span>10-26 11:20</span><span class="score-pill" style="margin-left:auto">92</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>92 / 85 · 通过</span></div><p>竞品数据有来源、结论可执行；三个赛道之间的差异解释充分。</p></div>
+      <p class="rd-p">从 14 个候选方向中收敛到 3 个可在 30 天内验证的赛道，判断依据是<b>付费意愿、内容供给缺口、单人可交付</b>三项。</p>
+      <table class="rd-table">
+        <thead><tr><th>赛道</th><th>竞争度</th><th>验证成本</th><th>建议</th></tr></thead>
+        <tbody>
+          <tr><td>独立开发者记账工具</td><td>中</td><td>低</td><td>优先验证</td></tr>
+          <tr><td>AI 出海部署清单</td><td>低</td><td>中</td><td>第二批</td></tr>
+          <tr><td>自由职业者税务助手</td><td>高</td><td>高</td><td>暂缓</td></tr>
+        </tbody>
+      </table>
+      <h3 class="rd-h">关键发现</h3>
+      <p class="rd-p">竞品普遍把「合规」当作卖点，却没人把「第一次上线要改哪 7 个配置」讲清楚。这是一个可以用一篇长文 + 一个生成器同时占住的位置。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,486 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-3">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 产品部 · DOC</div>
+      <h2 class="rd-title">AI 出海工具箱 PRD</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-product)">苏黎</span><span>10-22 16:40</span><span class="score-pill" style="margin-left:auto">94</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>94 / 85 · 通过</span></div><p>范围克制、验收标准明确，是这一轮质量最高的文档。</p></div>
+      <p class="rd-p">工具箱只做一件事：把一个产品从「能跑」推到「敢上线」。第一版包含<b>定价页、部署清单、首周监控</b>三个模块，不做账号体系与团队协作。</p>
+      <h3 class="rd-h">验收标准</h3>
+      <p class="rd-p">新用户在不看文档的情况下，20 分钟内完成一次完整上线检查，并得到一份可分享的清单链接。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">2,318 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-4">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 市场部 · PLAN</div>
+      <h2 class="rd-title">30 天发布节奏与渠道计划</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-market)">周野</span><span>10-24 18:12</span><span class="score-pill" style="margin-left:auto">90</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>90 / 85 · 通过</span></div><p>节奏合理，但渠道优先级仍需创始人确认——这也是当前唯一待拍板事项。</p></div>
+      <p class="rd-p">四周节奏：<b>第 1 周</b>建立可验证的落地页与等候名单；<b>第 2 周</b>发布三篇部署长文；<b>第 3 周</b>做一次公开构建直播；<b>第 4 周</b>收敛数据、决定是否加投。</p>
+      <table class="rd-table">
+        <thead><tr><th>周次</th><th>主渠道</th><th>目标</th></tr></thead>
+        <tbody>
+          <tr><td>W1</td><td>开发者社区</td><td>100 个等候名单</td></tr>
+          <tr><td>W2</td><td>技术博客 / SEO</td><td>3 篇长文，2 篇进首页</td></tr>
+          <tr><td>W3</td><td>视频直播</td><td>50 人实时观看</td></tr>
+        </tbody>
+      </table>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,092 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-5">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 技术部 · CODE</div>
+      <h2 class="rd-title">部署检查清单生成器</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-tech)">许南</span><span>10-26 13:31</span><span class="score-pill" style="margin-left:auto">92</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>92 / 85 · 通过</span></div><p>可直接运行，边界条件覆盖 18 种环境；建议补一条 CI 模板。</p></div>
+      <p class="rd-p">一个单文件脚本：读取项目根目录的 <b>deploy.config.json</b>，输出按环境分组的检查清单，并标记缺失项。</p>
+      <pre style="margin:12px 0;padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);overflow:auto;font-family:var(--font-mono);font-size:10.5px;line-height:1.8;color:var(--text-dim)">$ node scripts/checklist.js --env=prod
+✓ env vars            18 / 18
+✓ healthcheck          configured
+✗ rollback plan        missing
+→ 1 blocking item</pre>
+      <p class="rd-p">退出码非 0 时阻断部署，适合直接接进 CI。所有检查项来自可编辑的 JSON，不写死在代码里。</p>
+      <div class="rd-foot"><button class="btn sm">下载源码</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,640 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-6">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 技术部 · REPORT</div>
+      <h2 class="rd-title">上线前遗漏配置检查</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-tech)">陈序</span><span>10-26 13:48</span><span class="score-pill" style="margin-left:auto">92</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>92 / 85 · 通过</span></div><p>问题清单具体、修复建议可直接执行。</p></div>
+      <p class="rd-p">对现有服务做了一次上线前审计，发现 <b>3 类共 11 项</b>遗漏：环境变量 5 项、健康检查 2 项、回滚策略 4 项。其中 2 项会直接导致首次部署失败。</p>
+      <h3 class="rd-h">最需要先修的</h3>
+      <p class="rd-p">生产环境的 <b>DATABASE_URL</b> 仍指向本地文件；备份任务没有在部署脚本里触发；回滚脚本缺少数据库版本回退。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,380 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-7">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 设计部 · SCHEMA</div>
+      <h2 class="rd-title">定价页信息架构</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-design)">林深</span><span>10-23 15:06</span><span class="score-pill" style="margin-left:auto">88</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>88 / 85 · 通过</span></div><p>层级合理；价格档位命名还可以更直白。</p></div>
+      <p class="rd-p">定价页分三层：<b>一句话价值</b> → <b>三档对比</b> → <b>常见异议</b>。首屏只保留一个推荐档，避免选择瘫痪。</p>
+      <p class="rd-p">档位命名建议从「基础 / 专业 / 企业」改为按使用场景命名，让用户按「我现在要做什么」选择，而不是按「我够不够专业」。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">860 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-8">
+    <div class="reader-head">
+      <div class="rd-eyebrow">GOAL 002 · 市场部 · LIST</div>
+      <h2 class="rd-title">首批 20 位种子用户名单</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-market)">程野</span><span>10-23 17:22</span><span class="score-pill" style="margin-left:auto">86</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>86 / 85 · 通过</span></div><p>来源可追溯；建议补上最近一次公开发言，方便首封邮件个性化。</p></div>
+      <p class="rd-p">20 位候选人均满足：过去 90 天公开发布过出海 / 部署相关内容，且有可验证的产品链接。按触达难度分为三组。</p>
+      <table class="rd-table">
+        <thead><tr><th>分组</th><th>人数</th><th>触达方式</th></tr></thead>
+        <tbody>
+          <tr><td>A · 已有往来</td><td>6</td><td>直接邮件</td></tr>
+          <tr><td>B · 社区活跃</td><td>9</td><td>公开回复 + 私信</td></tr>
+          <tr><td>C · 需要引荐</td><td>5</td><td>找共同联系人</td></tr>
+        </tbody>
+      </table>
+      <div class="rd-foot"><button class="btn sm">下载 CSV</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">740 tokens</span></div>
+    </div>
+  </template>
+
+  <template id="art-tpl-9">
+    <div class="reader-head">
+      <div class="rd-eyebrow">COMPANY · 职能部 · WEEKLY</div>
+      <h2 class="rd-title">公司运行周报 · 第 1 期</h2>
+      <div class="rd-meta"><span class="dept-tag" style="--dept:var(--dept-ops)">何静</span><span>10-25 20:00</span><span class="score-pill" style="margin-left:auto">95</span></div>
+    </div>
+    <div class="reader-body">
+      <div class="qa"><div class="qa-top"><span>QUALITY REVIEW</span><span>95 / 85 · 通过</span></div><p>信息密度与可读性平衡得最好的一份；数字都有口径。</p></div>
+      <p class="rd-p">本周完成 <b>2 个目标、8 项交付、9 份成果</b>，平均质量 92，返工 0。tokens 消耗 21.1k，其中产品部占 53%。</p>
+      <h3 class="rd-h">需要你拍板</h3>
+      <p class="rd-p">30 天发布节奏的渠道优先级：是先做开发者社区，还是先做 SEO 长文？市场部建议前者，理由是首周就能拿到转化信号。</p>
+      <div class="rd-foot"><button class="btn sm">下载 Markdown</button><button class="btn sm quiet">复制链接</button><span style="margin-left:auto;font-family:var(--font-mono);font-size:8.5px;color:var(--text-faint);align-self:center">1,120 tokens</span></div>
+    </div>
+  </template>
+</main>
+
+<script>
+(function(){
+  var root = document.documentElement;
+  var params = new URLSearchParams(location.search);
+
+  function setTheme(t){
+    root.setAttribute('data-theme', t);
+    document.querySelectorAll('[data-theme-btn]').forEach(function(b){
+      b.classList.toggle('on', b.getAttribute('data-theme-btn') === t);
+    });
+    try { localStorage.setItem('bg-preview-theme', t); } catch(e){}
+  }
+  var initial = params.get('theme');
+  if (!initial) { try { initial = localStorage.getItem('bg-preview-theme'); } catch(e){} }
+  setTheme(initial === 'paper' ? 'paper' : 'ink');
+
+  document.querySelectorAll('[data-theme-btn]').forEach(function(b){
+    b.addEventListener('click', function(){ setTheme(b.getAttribute('data-theme-btn')); });
+  });
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-tab]'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('[data-panel]'));
+
+  function showTab(name, scroll){
+    var found = false;
+    panels.forEach(function(p){
+      var on = p.getAttribute('data-panel') === name;
+      p.classList.toggle('on', on);
+      if (on) found = true;
+    });
+    if (!found) { name = 'home'; panelOf('home').classList.add('on'); }
+    tabs.forEach(function(t){
+      t.classList.toggle('on', t.getAttribute('data-tab') === name);
+    });
+    try { history.replaceState(null, '', '#' + name); } catch(e){ location.hash = name; }
+    if (scroll) window.scrollTo(0, 0);
+    onPanelShown(name);
+  }
+
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){ showTab(t.getAttribute('data-tab'), true); });
+  });
+
+  var hash = (location.hash || '').replace('#','');
+  showTab(hash || 'home', false);
+
+  function bindArtifacts(){
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.arow'));
+    var reader = document.querySelector('[data-reader]');
+    rows.forEach(function(row){
+      row.addEventListener('click', function(){
+        rows.forEach(function(r){ r.classList.remove('on'); });
+        row.classList.add('on');
+        var tpl = document.getElementById('art-tpl-' + row.getAttribute('data-art'));
+        if (tpl && reader) {
+          reader.innerHTML = tpl.innerHTML;
+          reader.scrollTop = 0;
+          var body = reader.querySelector('.reader-body');
+          if (body) { body.classList.remove('turn'); void body.offsetWidth; body.classList.add('turn'); }
+        }
+      });
+    });
+    if (rows.length) rows[0].click();
+  }
+  bindArtifacts();
+
+  document.querySelectorAll('.sw').forEach(function(el){
+    el.addEventListener('click', function(){ el.classList.toggle('on'); });
+  });
+
+  document.querySelectorAll('.togg').forEach(function(el){
+    el.addEventListener('click', function(){ el.classList.toggle('on'); });
+  });
+
+  /* ================= 施工过程动效引擎 ================= */
+  var reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var liveOn = !reduce && params.get('still') !== '1';
+  var goalTimers = [];
+  var seen = {};
+  if (liveOn) document.documentElement.classList.add('anim');
+
+  function q(sel, ctx){ return (ctx || document).querySelector(sel); }
+  function qa(sel, ctx){ return Array.prototype.slice.call((ctx || document).querySelectorAll(sel)); }
+  function panelOf(name){
+    for (var i = 0; i < panels.length; i++) if (panels[i].getAttribute('data-panel') === name) return panels[i];
+    return null;
+  }
+  function pad2(n){ return (n < 10 ? '0' : '') + n; }
+  function clockText(){ return pad2(appNow.getHours()) + ':' + pad2(appNow.getMinutes()); }
+
+  /* --- 顶栏时钟：让这一屏看起来是活的 --- */
+  var appNow = new Date(2026, 9, 26, 14, 12, 8);
+  (function(){
+    var el = document.getElementById('clock'); if (!el) return;
+    function paint(){
+      el.textContent = pad2(appNow.getHours()) + ':' + pad2(appNow.getMinutes()) + ':' + pad2(appNow.getSeconds());
+    }
+    paint();
+    if (liveOn) setInterval(function(){ appNow = new Date(appNow.getTime() + 1000); paint(); }, 1000);
+  })();
+
+  /* --- 进场分批浮现：每次切页都重新演一遍 --- */
+  function armReveal(panel){
+    if (!liveOn || !panel) return;
+    var items = qa('.page-hint, .appbody > *, .spec > div', panel);
+    items.forEach(function(el, i){
+      el.setAttribute('data-rv', '');
+      el.classList.remove('in');
+      el.style.setProperty('--d', Math.min(i * 62, 460) + 'ms');
+    });
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){
+      items.forEach(function(el){ el.classList.add('in'); });
+    }); });
+    setTimeout(function(){ items.forEach(function(el){ el.classList.add('in'); }); }, 1500);
+  }
+
+  function setNum(el, to, ms, grouped){
+    if (!el) return;
+    if (!liveOn) { el.textContent = grouped ? to.toLocaleString('en-US') : String(to); return; }
+    var t0 = performance.now();
+    (function tick(now){
+      var k = Math.min(1, (now - t0) / ms);
+      var v = Math.round(to * (1 - Math.pow(1 - k, 3)));
+      el.textContent = grouped ? v.toLocaleString('en-US') : String(v);
+      if (k < 1) requestAnimationFrame(tick);
+    })(t0);
+  }
+  function stash(el){ if (el && el.dataset.final === undefined) el.dataset.final = el.textContent; return el; }
+  function show(el){ if (el) el.classList.add('in'); }
+
+  /* --- 项目详情：从发布到归档，整条生产线重放一次 --- */
+  function replayGoal(finish){
+    var p = panelOf('goal');
+    if (!p || !liveOn) { if (finish) finish(); return; }
+    var pipe = q('.pipeline', p), ps = qa('.pstep', p), heads = qa('.sec-head', p),
+        groups = qa('.ws', p), donut = q('.donut', p), side = q('.donut-side b', p),
+        avg = q('.qrow b.ok', p), toks = qa('.qrow b', p)[3], feeds = qa('.feed-item', p);
+
+    qa('.score-pill', p).forEach(stash); stash(avg); stash(toks); stash(side);
+    var dv = [qa('.dv', groups[0]), qa('.dv', groups[1]), qa('.dv', groups[2])];
+
+    pipe.classList.add('busy');
+    ps.forEach(function(s, i){ s.classList.remove('done'); s.setAttribute('data-st', i ? 'wait' : 'run'); });
+    heads.concat(groups, dv[0], dv[1], dv[2], feeds).forEach(function(el){
+      el.setAttribute('data-rv', ''); el.classList.remove('in'); el.style.setProperty('--d', '0ms');
+    });
+    qa('.badge', p).forEach(function(b){ b.style.visibility = 'hidden'; });
+    qa('.score-pill', p).forEach(function(s){ s.textContent = '0'; });
+    if (avg) avg.textContent = '0';
+    if (toks) toks.textContent = '0';
+    paintDonut(donut, 0);
+
+    var landed = 0;
+    function later(ms, fn){ goalTimers.push(setTimeout(fn, ms)); }
+    function deliver(list, base, gap){
+      list.forEach(function(row, i){
+        later(base + i * gap, function(){
+          row.classList.add('landing'); show(row);
+          var pill = q('.score-pill', row);
+          if (pill) { pill.classList.add('pop'); setNum(pill, parseInt(pill.dataset.final, 10) || 92, 520); }
+          landed += 1;
+          var ratio = Math.min(4, landed) / 4;
+          paintDonut(donut, Math.min(100, landed * 25));
+          if (toks) setNum(toks, Math.round(parseInt((toks.dataset.final || '9874').replace(/,/g, ''), 10) * ratio), 520, true);
+        });
+      });
+    }
+    later(520, function(){ ps[0].setAttribute('data-st', 'done'); ps[0].classList.add('done'); ps[1].setAttribute('data-st', 'run'); });
+    later(1180, function(){
+      ps[1].setAttribute('data-st', 'done'); ps[1].classList.add('done');
+      ps[2].setAttribute('data-st', 'run'); show(heads[0]); show(groups[0]);
+    });
+    deliver(dv[0], 1600, 560);
+    later(2760, function(){ show(groups[1]); });
+    deliver(dv[1], 3080, 560);
+    later(4240, function(){
+      ps[2].setAttribute('data-st', 'done'); ps[2].classList.add('done');
+      ps[3].setAttribute('data-st', 'run'); pipe.classList.remove('busy');
+      show(heads[1]); show(groups[2]);
+    });
+    deliver(dv[2], 4600, 420);
+    later(5980, function(){
+      ps[3].setAttribute('data-st', 'done'); ps[3].classList.add('done');
+      feeds.forEach(function(f, i){ later(i * 200, function(){ f.classList.add('fresh'); show(f); }); });
+      qa('.badge', p).forEach(function(b, i){ later(i * 90, function(){ b.classList.add('flip'); b.style.visibility = ''; }); });
+      paintDonut(donut, 100);
+      setNum(avg, parseInt(avg.dataset.final, 10) || 92, 760);
+      setNum(toks, parseInt((toks.dataset.final || '9874').replace(/,/g, ''), 10) || 9874, 760, true);
+      later(900, function(){ if (finish) finish(); });
+    });
+  }
+  /* 中途切页也要把项目详情还原成「已归档」，不留半截动画 */
+  function goalFinal(){
+    var p = panelOf('goal'); if (!p) return;
+    var pipe = q('.pipeline', p);
+    if (pipe) pipe.classList.remove('busy');
+    qa('.pstep', p).forEach(function(s){ s.classList.add('done'); s.setAttribute('data-st', 'done'); });
+    qa('.sec-head, .ws, .dv, .feed-item', p).forEach(function(el){ el.classList.add('in'); });
+    qa('.badge', p).forEach(function(b){ b.style.visibility = ''; });
+    qa('.score-pill', p).forEach(function(s){ if (s.dataset.final) s.textContent = s.dataset.final; });
+    var avg = q('.qrow b.ok', p), toks = qa('.qrow b', p)[3], side = q('.donut-side b', p);
+    if (avg && avg.dataset.final) avg.textContent = avg.dataset.final;
+    if (toks && toks.dataset.final) toks.textContent = toks.dataset.final;
+    if (side && side.dataset.final) side.textContent = side.dataset.final;
+    paintDonut(q('.donut', p), 100);
+  }
+  function clearGoalTimers(){
+    goalTimers.forEach(clearTimeout); goalTimers = [];
+  }
+  function paintDonut(el, pct){
+    if (!el) return;
+    el.style.background = 'conic-gradient(var(--accent) 0 ' + pct + '%, var(--line) 0)';
+    var b = q('b', el);
+    if (b) b.innerHTML = Math.round(pct) + '<em>%</em>';
+  }
+
+  /* --- 看板：任务真的在被人推着走 --- */
+  function fly(el, a, b){
+    if (!el.animate) return;
+    el.animate(
+      [{ transform: 'translate(' + (a.left - b.left) + 'px,' + (a.top - b.top) + 'px) scale(1.03)', opacity: .55 },
+       { transform: 'none', opacity: 1 }],
+      { duration: 680, easing: 'cubic-bezier(.22,1,.36,1)' }
+    );
+  }
+  function refreshLanes(p){
+    qa('.lane', p).forEach(function(l){
+      var n = q('.lane-head .n', l);
+      if (n) n.textContent = qa('.task', l).length;
+    });
+    var ops = qa('.ops .m b', p);
+    if (ops.length >= 2) {
+      ops[0].textContent = qa('.task', qa('.lane', p)[1]).length;
+      ops[1].textContent = 19 + qa('.task', qa('.lane', p)[2]).length - 3;
+    }
+    var liveN = document.getElementById('live-n');
+    if (liveN) liveN.textContent = qa('.task', qa('.lane', p)[1]).length;
+    var shown = qa('.task', qa('.lane', p)[2]).length;
+    var total = parseInt((qa('.ops .m b', p)[1] || {}).textContent, 10) || 19;
+    qa('.lane-body > div', qa('.lane', p)[2]).forEach(function(note){
+      if (note.textContent.indexOf('还有') === 0) {
+        note.textContent = '还有 ' + Math.max(0, total - shown) + ' 项 · 查看全部 →';
+      }
+    });
+  }
+  function prependLive(p, txt, who){
+    var card = q('.live-card', p); if (!card) return;
+    var item = document.createElement('div');
+    item.className = 'live-item fresh';
+    item.innerHTML = '<time>' + clockText() + '</time><div><p>' + txt + '</p><span class="who">' + who + '</span></div>';
+    var first = q('.live-item', card);
+    if (first) card.insertBefore(item, first); else card.appendChild(item);
+    while (qa('.live-item', card).length > 6) card.removeChild(qa('.live-item', card).pop());
+  }
+  var boardPushed = 0;
+  function boardPush(){
+    var p = panelOf('board'); if (!p || !liveOn || boardPushed >= 3) return;
+    var lanes = qa('.lane', p), todo = lanes[0], running = lanes[1], doneL = lanes[2];
+    var card = q('.task', running);
+    if (card) {
+      var before = card.getBoundingClientRect();
+      var title = q('h4', card).textContent;
+      var foot = q('.task-foot', card), who = q('.who', foot);
+      var badge = q('.badge.run', foot); if (badge) badge.parentNode.removeChild(badge);
+      if (who) who.textContent = (who.textContent.split('·')[0] || '').trim() + ' · ' + clockText();
+      var pill = document.createElement('span');
+      pill.className = 'score-pill pop'; pill.textContent = '92';
+      foot.appendChild(pill);
+      var prog = q('.tprog', card); if (prog) prog.parentNode.removeChild(prog);
+      q('.lane-body', doneL).appendChild(card);
+      fly(card, before, card.getBoundingClientRect());
+      card.classList.add('landing'); doneL.classList.add('receiving');
+      setTimeout(function(){ doneL.classList.remove('receiving'); }, 1200);
+      prependLive(p, '<b>任务完成</b> ' + title + ' <span class="score-pill" style="font-size:8px;padding:0 4px">92</span>',
+        (q('.dept-tag', card) || {}).textContent || '');
+    }
+    var next = q('.task', todo);
+    if (next) {
+      var b2 = next.getBoundingClientRect();
+      var f2 = q('.task-foot', next), spans = qa('span', f2);
+      if (spans[1] && !spans[1].className) spans[1].outerHTML = '<span class="badge run">尝试 1 / 2</span>';
+      var bar = document.createElement('div');
+      bar.className = 'tprog'; bar.innerHTML = '<i></i>';
+      next.appendChild(bar);
+      var body = q('.lane-body', running), anchor = q('.task', running);
+      if (anchor) body.insertBefore(next, anchor); else body.appendChild(next);
+      fly(next, b2, next.getBoundingClientRect());
+      running.classList.add('receiving');
+      setTimeout(function(){ running.classList.remove('receiving'); }, 1200);
+      setTimeout(function(){ var i = q('.tprog i', next); if (i) i.style.width = '88%'; }, 220);
+      setTimeout(boardPush, 3600);
+    }
+    refreshLanes(p);
+    boardPushed += 1;
+  }
+
+  /* --- 成果：逐份翻过阅读面板 --- */
+  function walkArtifacts(){
+    var rows = qa('.arow');
+    rows.forEach(function(row, i){ setTimeout(function(){ row.click(); }, i * 620); });
+  }
+
+  /* --- 组织：把正在干活的人和部门点亮 --- */
+  function playOrg(){
+    var p = panelOf('org'); if (!p || !liveOn) return;
+    qa('.emp', p).forEach(function(e){ if (q('.dot.run', e)) e.classList.add('hot'); });
+    var cols = qa('.dept-col', p);
+    cols.forEach(function(c, i){
+      setTimeout(function(){
+        c.classList.add('spot');
+        setTimeout(function(){ c.classList.remove('spot'); }, 780);
+      }, i * 560);
+    });
+  }
+
+  /* --- 目标页：写下目标 → 发布 → 生产线亮起 --- */
+  function playHome(){
+    var p = panelOf('home'); if (!p || !liveOn) return;
+    var ta = q('.composer textarea', p), btn = q('.composer .btn.primary', p);
+    var text = '做一款 AI 记账 App，帮助自由职业者看清现金流';
+    if (ta) {
+      ta.value = '';
+      try { ta.focus({ preventScroll: true }); } catch(e){ ta.focus(); }
+      var i = 0;
+      (function type(){
+        if (i <= text.length) { ta.value = text.slice(0, i); i += 1; setTimeout(type, 40); }
+        else publish();
+      })();
+    }
+    function publish(){
+      if (ta) ta.blur();
+      if (btn) btn.classList.add('pulse-btn');
+      setTimeout(function(){
+        if (btn) btn.classList.remove('pulse-btn');
+        spawnGoalRow(p, text);
+      }, 900);
+    }
+  }
+  function spawnGoalRow(p, text){
+    if (q('.goal-row[data-new]', p)) return;
+    var lineage = q('.lineage', p), first = q('.goal-row', p);
+    var row = document.createElement('article');
+    row.className = 'goal-row landing';
+    row.setAttribute('data-new', '');
+    row.setAttribute('data-rv', '');
+    row.innerHTML =
+      '<div class="goal-id"><b>003</b>GOAL</div>' +
+      '<div class="goal-main"><h3>' + text + '</h3>' +
+      '<div class="goal-sub"><span class="badge run"><span class="dot run"></span>施工中</span><span>创建 10-26 ' + clockText() + '</span><span>CEO 已拆解</span></div>' +
+      '<div class="goal-steps">' +
+      '<span class="gstep done">目标定稿</span><span class="gstep-sep">→</span>' +
+      '<span class="gstep live">拆解工作流</span><span class="gstep-sep">→</span>' +
+      '<span class="gstep">部门交付</span><span class="gstep-sep">→</span>' +
+      '<span class="gstep">质检归档</span></div></div>' +
+      '<div class="goal-stats"><div class="gs"><b>0<em>/4</em></b><span>交付物</span></div>' +
+      '<div class="gs"><b>—</b><span>均分</span></div>' +
+      '<div class="gs"><b>0.3k</b><span>TOKENS</span></div></div>' +
+      '<span class="row-arrow">→</span>';
+    if (lineage && first) lineage.insertBefore(row, first);
+    requestAnimationFrame(function(){ row.classList.add('in'); });
+    var more = q('.sec-head .more', p);
+    if (more) more.textContent = '共 3 个目标 · 1 个施工中';
+    var metric = q('.pulse .m b', p);
+    if (metric) metric.innerHTML = '3<span>/3</span>';
+    var label = q('.pulse .m small', p);
+    if (label) label.textContent = '目标 · 1 个施工中';
+    var liveN = document.getElementById('live-n');
+    if (liveN) liveN.textContent = '3';
+    rotateTicker('目标 <b>GOAL 003</b> 已发布 · CEO 正在拆解为 2 条工作流，5 个部门待命');
+  }
+  var tickerLines = [
+    'CEO 第 1 轮巡视完成 · <b>5 个部门，0 阻塞</b> · 最近归档 <b>14:02 验证动作与决策排序</b>',
+    '技术部 · 许南 正在校验部署检查清单的边界条件，<b>尝试 1 / 2</b>',
+    '质检引擎刚通过 <b>上线前遗漏配置检查</b>，92 分，高于门槛 7 分',
+    '市场部 · 周野 提交「30 天发布节奏终审」，<b>等你拍板</b>'
+  ];
+  function paintTicker(html){
+    var el = q('.ticker', panelOf('home')); if (!el) return;
+    el.innerHTML = '<span class="dot on"></span><span class="tk">' + html + '</span>';
+  }
+  function rotateTicker(one){
+    if (one) { paintTicker(one); return; }
+    var i = 0;
+    setInterval(function(){ i = (i + 1) % tickerLines.length; paintTicker(tickerLines[i]); }, 5400);
+  }
+
+  /* --- 播放键：按当前页决定演哪一段 --- */
+  var playing = false, currentName = 'home';
+  function setBtn(on){
+    var b = document.getElementById('play'); if (!b) return;
+    b.classList.toggle('busy', on);
+    b.innerHTML = on ? '<i>■</i>施工中…' : '<i>▶</i>播放施工过程';
+  }
+  function stopPlay(){ playing = false; setBtn(false); }
+  function onPanelShown(name){
+    var prev = currentName;
+    currentName = name;
+    if (prev === 'goal' && name !== 'goal') { clearGoalTimers(); goalFinal(); }
+    armReveal(panelOf(name));
+    if (name === 'org') playOrg();
+    /* 第一次打开就把施工过程演一遍，不用人手动点 */
+    if (liveOn && !seen[name]) {
+      seen[name] = 1;
+      if (name === 'goal') setTimeout(function(){
+        if (currentName === 'goal') { playing = true; setBtn(true); replayGoal(stopPlay); }
+      }, 460);
+      if (name === 'board') setTimeout(function(){
+        if (currentName === 'board') { playing = true; setBtn(true); boardPush(); setTimeout(stopPlay, 5200); }
+      }, 520);
+      if (name === 'home') setTimeout(function(){ if (currentName === 'home') playHome(); }, 1200);
+    }
+  }
+  (function(){
+    var b = document.getElementById('play'); if (!b) return;
+    b.addEventListener('click', function(){
+      if (!liveOn) { paintTicker('已按系统偏好关闭动效（减少动态效果）。'); return; }
+      if (playing) { stopPlay(); return; }
+      playing = true; setBtn(true);
+      if (currentName === 'goal') {
+        replayGoal(function(){ stopPlay(); });
+      } else if (currentName === 'board') {
+        refreshLanes(panelOf('board')); boardPush(); setTimeout(stopPlay, 4200);
+      } else if (currentName === 'artifacts') {
+        walkArtifacts(); setTimeout(stopPlay, qa('.arow').length * 620 + 400);
+      } else if (currentName === 'org') {
+        playOrg(); setTimeout(stopPlay, 3200);
+      } else if (currentName === 'home') {
+        playHome(); setTimeout(stopPlay, 4600);
+      } else {
+        armReveal(panelOf(currentName)); setTimeout(stopPlay, 900);
+      }
+    });
+  })();
+
+  if (liveOn) {
+    rotateTicker();
+    setInterval(function(){ if (currentName === 'board' && boardPushed < 3) boardPush(); }, 9000);
+    /* 首屏是在引擎初始化前选中的，这里补一次进场 + 自动播放 */
+    setTimeout(function(){
+      var on = panels.filter(function(p){ return p.classList.contains('on'); })[0];
+      onPanelShown(on ? on.getAttribute('data-panel') : 'home');
+    }, 80);
+  } else {
+    document.querySelectorAll('.page-hint').forEach(function(el){ el.style.opacity = 1; });
+  }
+})();
+</script>
+</body>
+</html>
