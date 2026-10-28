@@ -38,10 +38,41 @@
           <el-button v-if="canResume" size="small" type="primary" plain :loading="acting" @click="doAction('resume')">恢复</el-button>
           <el-button v-if="canAccept" size="small" class="accept-btn" :loading="acting" @click="accept">复核归档</el-button>
           <el-button v-if="canReplan" size="small" plain :loading="acting" @click="doAction('replan')">重新拆解</el-button>
-          <el-button size="small" text class="export-btn" @click="exportZip">导出项目</el-button>
+          <el-button size="small" text class="export-btn" @click="exportZip">下载 zip</el-button>
+          <el-button size="small" text class="export-btn" :loading="dirExporting" @click="exportToDir">存到目录</el-button>
         </div>
       </div>
     </header>
+
+    <!-- 缺料:成果卡在这里不是能力问题,是缺事实。必须显眼,否则用户只会看到一堆"受阻" -->
+    <section v-if="needsInputList.length" class="needs glass">
+      <div class="needs-head">
+        <span class="needs-mark">需要你补 3 分钟</span>
+        <h3>有 {{ needsInputList.length }} 件事公司查不到,只能你来给</h3>
+        <p>它们不补齐,这部分成果只能靠猜。填完会立刻重新排队,已确认的事实此后全程生效。</p>
+      </div>
+      <ul class="needs-list">
+        <li v-for="(n, i) in needsInputList" :key="i"><span class="needs-no">{{ String(i + 1).padStart(2, '0') }}</span>{{ n }}</li>
+      </ul>
+      <div class="needs-form">
+        <el-input v-model="factsText" type="textarea" :rows="4" resize="none"
+                  placeholder="按上面的编号逐条写清楚,例如:1) 产品共 11 个功能:…… 2) 近 12 个月付费客户 37 家……" />
+        <div class="needs-actions">
+          <span class="needs-hint">写清楚比写多重要;不确定的写“暂不确定”,也比我编一个强。</span>
+          <el-button type="primary" size="small" :loading="submittingFacts" :disabled="!factsText.trim()" @click="submitFacts">提交补料</el-button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 已确认事实:让创始人知道"公司现在以什么为准",避免同一件事反复问 -->
+    <section v-else-if="goal.providedFacts" class="facts glass">
+      <div class="facts-head">
+        <span class="facts-tag">已确认事实</span>
+        <span class="facts-hint">后续拆解、执行、评审都以此为准</span>
+        <button class="facts-toggle" @click="factsOpen = !factsOpen">{{ factsOpen ? '收起' : '展开' }}</button>
+      </div>
+      <pre v-if="factsOpen" class="facts-body">{{ goal.providedFacts }}</pre>
+    </section>
 
     <!-- 四步生产线:拆解 → 分派 → 交付 → 归档,当前卡住的那一步在亮 -->
     <nav class="pipeline glass" :class="{ 'is-rp': rp.on }" aria-label="施工进度">
@@ -130,7 +161,7 @@
                       <span v-if="d.attempts > 1">第 {{ d.attempts }} 次执行</span>
                       <span v-if="depText(d)">依赖 {{ depText(d) }}</span>
                     </div>
-                    <p class="d-notes" v-if="d.status === 'BLOCKED' && d.reviewNotes">{{ d.reviewNotes }}</p>
+                    <p class="d-notes" v-if="(d.status === 'BLOCKED' || d.status === 'WAITING') && d.reviewNotes">{{ d.reviewNotes }}</p>
                   </div>
                   <div class="d-actions">
                     <el-button v-if="artifactOf(d)" text size="small" class="d-art" @click="openArtifact(artifactOf(d))">
@@ -328,7 +359,7 @@ const statusText = computed(() => statusMap[goal.value.status] || goal.value.sta
 
 const dsMap = {
   PENDING: '待开始', READY: '待执行', RUNNING: '执行中', REVIEW: '评审中',
-  REWORK: '返工中', DONE: '已完成', BLOCKED: '受阻', CANCELLED: '已取消'
+  REWORK: '返工中', DONE: '已完成', BLOCKED: '受阻', WAITING: '等上游', CANCELLED: '已取消'
 }
 const wsMap = { PLANNING: '拆解中', ACTIVE: '推进中', DONE: '已完成', BLOCKED: '受阻', PAUSED: '已暂停' }
 const artMap = { DRAFT: '草稿', REVIEW: '待评审', APPROVED: '已通过', REJECTED: '未通过' }
@@ -545,6 +576,53 @@ async function exportZip() {
   try {
     await api.downloadGoal(goal.value.id, goal.value.title)
   } catch (e) { ElMessage.error('导出失败') }
+}
+
+const dirExporting = ref(false)
+async function exportToDir() {
+  dirExporting.value = true
+  try {
+    const r = await api.exportGoalToDir(goal.value.id)
+    if (r.ok) {
+      ElMessage({ message: '已写入 ' + r.dir + '(' + r.files + ' 个文件)', type: 'success', plain: true, duration: 4200 })
+    } else {
+      ElMessage.error(r.error || '写入失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '写入失败')
+  } finally { dirExporting.value = false }
+}
+
+/* ===== 缺料补报 ===== */
+const factsText = ref('')
+const factsOpen = ref(false)
+const submittingFacts = ref(false)
+const needsInputList = computed(() => {
+  const raw = goal.value.needsInput
+  if (!raw) return []
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter(Boolean) : []
+  } catch (e) {
+    return String(raw).split('\n').filter(Boolean)
+  }
+})
+async function submitFacts() {
+  const text = factsText.value.trim()
+  if (!text) return
+  submittingFacts.value = true
+  try {
+    const r = await api.provideInputs(goal.value.id, text)
+    factsText.value = ''
+    factsOpen.value = true
+    ElMessage({
+      message: r.reset > 0 ? `已记录,${r.reset} 项受阻交付重新排队` : '已记录,后续拆解与执行以此为准',
+      type: 'success', plain: true
+    })
+    await load()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '提交失败')
+  } finally { submittingFacts.value = false }
 }
 
 function openArtifact(id) {
@@ -766,6 +844,8 @@ onBeforeUnmount(() => {
 .dsc-running, .dsc-review { color: var(--glow-cyan); background: var(--glow-cyan-faint); }
 .dsc-done { color: var(--st-ok); background: rgba(var(--rgb-ok), .1); }
 .dsc-blocked { color: var(--st-error); background: rgba(var(--rgb-error), .1); }
+.dsc-waiting { color: var(--st-plan); background: rgba(var(--rgb-plan), .12); }
+.delivery.ds-waiting { border-left-color: rgba(var(--rgb-plan), .5); }
 .dsc-pending, .dsc-ready { color: var(--text-dim); }
 .d-main { flex: 1; min-width: 0; }
 .d-title-line { display: flex; align-items: baseline; gap: 10px; }
@@ -819,9 +899,44 @@ onBeforeUnmount(() => {
 .feed-time { font-family: var(--font-mono); font-size: 9px; color: var(--text-faint); }
 .feed-text { margin: 4px 0 0; font-size: 11px; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
 
+/* ===== 缺料补报:整页最该被看见的东西,用暖色而不是报错的红 ===== */
+.needs {
+  padding: 18px 24px 20px; border-radius: 14px;
+  border: 1px solid rgba(var(--rgb-warn), .32);
+  background: linear-gradient(165deg, rgba(var(--rgb-warn), .07), rgba(var(--rgb-surface-2), .66));
+  animation: riseIn .5s var(--ease-out) both;
+}
+.needs-head { display: flex; flex-direction: column; gap: 6px; }
+.needs-mark {
+  align-self: flex-start; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .22em;
+  color: var(--st-warn); border: 1px solid rgba(var(--rgb-warn), .38); border-radius: 999px; padding: 2px 10px;
+}
+.needs-head h3 { margin: 2px 0 0; font-size: 15px; font-weight: 300; letter-spacing: .1em; color: var(--text-moon); }
+.needs-head p { margin: 0; font-size: 11.5px; line-height: 1.8; color: var(--text-dim); }
+.needs-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.needs-list li {
+  display: flex; gap: 12px; font-size: 12.5px; line-height: 1.75; color: var(--text-moon);
+  padding: 9px 12px; border-radius: 9px; background: rgba(var(--rgb-warn), .05);
+  border-left: 2px solid rgba(var(--rgb-warn), .4);
+}
+.needs-no { font-family: var(--font-mono); font-size: 10.5px; color: var(--st-warn); flex: none; padding-top: 2px; }
+.needs-form { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.needs-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.needs-hint { font-size: 11px; color: var(--text-faint); }
+
+.facts { padding: 12px 18px; border-radius: 12px; border: 1px solid var(--border-hair); background: var(--tint-soft); }
+.facts-head { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-dim); }
+.facts-tag {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .18em; color: var(--st-ok);
+  border: 1px solid rgba(var(--rgb-ok), .3); border-radius: 999px; padding: 2px 9px;
+}
+.facts-toggle { margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--glow-cyan-dim);
+               font-size: 11px; letter-spacing: .1em; }
+.facts-body { margin: 10px 0 0; font-family: var(--font-sans); font-size: 12px; line-height: 1.9;
+              color: var(--text-dim); white-space: pre-wrap; word-break: break-word; }
+
 /* ===== 四步生产线:当前卡住的那一步顶边流光,走完了才落定 ===== */
-.pipeline {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+.pipeline {  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   position: relative; overflow: hidden; margin-top: 2px;
 }
 .pstep { position: relative; padding: 14px 18px 15px; border-right: 1px solid var(--border-hair) }

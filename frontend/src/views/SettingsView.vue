@@ -122,8 +122,34 @@
           <p class="tip">建议保持在 82–88:门槛过低会让成果失去区分度,过高会让返工吃掉预算。最近 30 天平均 <b>{{ avgScore === null ? '待后端返回' : (avgScore || '暂无已归档成果') }}</b>{{ avgScore ? ' 分' : '' }}。</p>
         </section>
 
+        <!-- ===== 成果落盘 ===== -->
+        <section id="output" class="set-card glass" :style="{ '--i': 2 }">
+          <div class="set-card-head">
+            <div>
+              <h3>成果落盘</h3>
+              <p>成果不只存在数据库里。指定一个目录,通过评审的成果会写成真正的 md 文件,能直接拿走用。</p>
+            </div>
+            <span class="badge" :class="exportInfo.writable ? 'ok' : (exportInfo.checked ? 'err' : '')">
+              {{ !exportInfo.checked ? '目录待检测' : (exportInfo.writable ? '目录可写' : '目录不可写') }}
+            </span>
+          </div>
+          <div class="set-body">
+            <div class="set-row" :class="{ dirty: dirty('exportDir') }">
+              <div class="lbl"><b>落盘目录</b><span>留空则写进程序目录下的 exports/;可填绝对路径,如 E:\交付\空白格</span></div>
+              <div class="ctl wide-ctl">
+                <el-input v-model="form.exportDir" placeholder="留空 = ./exports" size="small" clearable />
+              </div>
+            </div>
+            <div class="set-row" :class="{ dirty: dirty('autoExportArtifacts') }">
+              <div class="lbl"><b>通过评审后自动落盘</b><span>每份成果过审即写入目录;关闭后仍可在成果库、项目页手动落盘</span></div>
+              <div class="ctl"><el-switch v-model="form.autoExportArtifacts" /></div>
+            </div>
+            <p class="path-line">当前解析到:<code>{{ exportInfo.dir || '读取中…' }}</code></p>
+          </div>
+        </section>
+
         <!-- ===== 公司与权限 ===== -->
-        <section id="company" class="set-card glass" :style="{ '--i': 2 }">
+        <section id="company" class="set-card glass" :style="{ '--i': 3 }">
           <div class="set-card-head">
             <div>
               <h3>公司与权限</h3>
@@ -152,7 +178,7 @@
         </section>
 
         <!-- ===== 数据与备份 ===== -->
-        <section id="data" class="set-card glass" :style="{ '--i': 3 }">
+        <section id="data" class="set-card glass" :style="{ '--i': 4 }">
           <div class="set-card-head">
             <div><h3>数据与备份</h3><p>数据库与设置都在本机 data/ 目录。</p></div>
           </div>
@@ -165,7 +191,7 @@
         </section>
 
         <!-- ===== 高级模式 ===== -->
-        <section v-if="showAdvanced" id="advanced" class="set-card glass adv" :style="{ '--i': 4 }">
+        <section v-if="showAdvanced" id="advanced" class="set-card glass adv" :style="{ '--i': 5 }">
           <div class="set-card-head">
             <div><h3>高级模式</h3><p>直接作用于每一次调用的原始参数,改错会让所有产出一起变差。</p></div>
           </div>
@@ -200,7 +226,8 @@ const defaults = {
   providers: [], knowledgeBase: '', concurrency: 4, dailyTokenBudget: 0,
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
   reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
-  decisionProvider: '', decisionModel: ''
+  decisionProvider: '', decisionModel: '',
+  exportDir: '', autoExportArtifacts: true
 }
 
 const form = ref({ ...defaults })
@@ -213,6 +240,7 @@ const loadError = ref('')
 const savedFlash = ref(false)
 const hasProvider = ref(null)
 const avgScore = ref(null)
+const exportInfo = reactive({ dir: '', writable: false, checked: false })
 const showAdvanced = ref(false)
 const activeSection = ref('models')
 const probes = reactive({})
@@ -220,6 +248,7 @@ const probes = reactive({})
 const navItems = [
   { id: 'models', label: '模型服务' },
   { id: 'quality', label: '质量与目标' },
+  { id: 'output', label: '成果落盘' },
   { id: 'company', label: '公司与权限' },
   { id: 'data', label: '数据与备份' }
 ]
@@ -353,8 +382,21 @@ async function load() {
     const scored = (arts || []).filter(a => a.score)
     avgScore.value = scored.length ? Math.round(scored.reduce((n, a) => n + a.score, 0) / scored.length) : 0
   } catch (e) { /* 统计数据只是让提示更具体,拿不到就留白 */ }
+  await loadExportInfo()
   await nextTick()
   observeSections()
+}
+
+async function loadExportInfo() {
+  try {
+    const r = await api.exportStatus()
+    exportInfo.dir = r.dir || ''
+    exportInfo.writable = !!r.writable
+    exportInfo.checked = true
+  } catch (e) {
+    exportInfo.checked = true
+    exportInfo.writable = false
+  }
 }
 
 async function save() {
@@ -366,6 +408,7 @@ async function save() {
     savedFlash.value = true
     setTimeout(() => { savedFlash.value = false }, 1800)
     ElMessage({ message: '已保存', type: 'success', plain: true })
+    loadExportInfo()
   } catch (e) {
     ElMessage.error('保存失败')
   } finally { saving.value = false }
@@ -475,6 +518,8 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .th-slider { flex: 1; }
 .row-none { padding: 14px 0; font-size: 11.5px; color: var(--text-faint); letter-spacing: .06em; }
 .tip { margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--border-hair); font-size: 11px; line-height: 1.8; color: var(--text-faint); }
+.path-line { margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--border-hair); font-size: 11px; color: var(--text-faint); }
+.path-line code { font-family: var(--font-mono); font-size: 11px; color: var(--glow-cyan-dim); word-break: break-all; }
 .tip b { font-family: var(--font-mono); font-weight: 400; color: var(--text-dim); }
 /* 改过还没保存的行:左侧一个亮点 */
 .set-row.dirty::after, .prov.dirty::after {

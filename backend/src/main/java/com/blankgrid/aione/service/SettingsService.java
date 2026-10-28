@@ -53,6 +53,10 @@ public class SettingsService {
         public int maxReviewRounds = 3;
         /** 目标创建后自动拆解 */
         public boolean autoStartGoals = true;
+        /** 成果落盘目录;空 = 程序目录下的 exports/。可填绝对路径(如 E:\交付\空白格) */
+        public String exportDir = "";
+        /** 评审通过后自动把成果写进落盘目录。null = 请求没带这个字段(保留原值),取值用 autoExportArtifacts() */
+        public Boolean autoExportArtifacts;
         /** CEO 决策(巡视拍板 + 目标拆解)专用服务商名;null=未提供,空串=跟随主用 */
         public String decisionProvider;
         /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
@@ -78,6 +82,8 @@ public class SettingsService {
             cache = load();
             // 落盘文件里可能没有 providers,统一补成空列表,后续取值不必到处判 null
             if (cache.providers == null) cache.providers = new ArrayList<>();
+            // 老配置文件没有这个字段:默认开着,别让升级把落盘功能悄悄关掉
+            if (cache.autoExportArtifacts == null) cache.autoExportArtifacts = Boolean.TRUE;
         }
         return cache;
     }
@@ -104,6 +110,8 @@ public class SettingsService {
         if (incoming.reviewThreshold > 0) current.reviewThreshold = Math.min(100, incoming.reviewThreshold);
         if (incoming.maxReviewRounds > 0) current.maxReviewRounds = Math.min(5, incoming.maxReviewRounds);
         current.autoStartGoals = incoming.autoStartGoals;
+        if (incoming.exportDir != null) current.exportDir = incoming.exportDir.trim();
+        if (incoming.autoExportArtifacts != null) current.autoExportArtifacts = incoming.autoExportArtifacts;
         // 决策模型槽位:只在请求真的带了这两个字段时才覆盖(老客户端不传就不会被清空)
         if (incoming.decisionProvider != null) current.decisionProvider = incoming.decisionProvider.trim();
         if (incoming.decisionModel != null) current.decisionModel = incoming.decisionModel.trim();
@@ -153,6 +161,18 @@ public class SettingsService {
         Provider p = primaryProvider();
         return p != null && p.baseUrl != null && !p.baseUrl.isBlank()
                 && p.model != null && !p.model.isBlank();
+    }
+
+    /** 成果落盘目录:配置为空时用程序目录下的 exports/,填了相对路径也按程序目录展开 */
+    public Path exportRoot() {
+        String raw = get().exportDir;
+        Path p = (raw == null || raw.isBlank()) ? Path.of("exports") : Path.of(raw.trim());
+        return p.toAbsolutePath().normalize();
+    }
+
+    /** 评审通过后是否自动落盘 */
+    public boolean autoExportArtifacts() {
+        return !Boolean.FALSE.equals(get().autoExportArtifacts);
     }
 
     /** 自学习沉淀:把复盘教训追加进全员知识库(去重,保留最近 20 条) */

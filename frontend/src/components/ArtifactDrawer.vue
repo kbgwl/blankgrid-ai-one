@@ -8,6 +8,7 @@
             <span class="art-ver">v{{ art.version }}</span>
             <span class="art-status" :class="'as-' + (art.status || '').toLowerCase()">{{ statusText }}</span>
           </div>
+          <el-button size="small" text class="dl" @click="saveToDir">存到落盘目录</el-button>
           <el-button size="small" text class="dl" @click="download">下载 Markdown</el-button>
         </div>
         <h2 class="art-title">{{ art.title }}</h2>
@@ -71,6 +72,16 @@ function fmt(iso) {
 
 async function download() {
   try { await api.downloadArtifact(art.value.id, art.value.title) } catch (e) { ElMessage.error('下载失败') }
+}
+
+async function saveToDir() {
+  try {
+    const r = await api.exportArtifactToDir(art.value.id)
+    if (r.ok) ElMessage({ message: '已写入 ' + r.file, type: 'success', plain: true, duration: 4600 })
+    else ElMessage.error(r.error || '写入失败')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '写入失败')
+  }
 }
 </script>
 

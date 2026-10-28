@@ -1,39 +1,98 @@
 <template>
   <div class="board">
     <div class="board-main">
-      <!-- 统计带 -->
-      <div class="stat-row">
-        <div class="stat glass" v-for="s in statCards" :key="s.label" :class="{ 'is-pulse': statPulse.has(s.label) }">
-          <div class="stat-num" :class="{ cyan: s.cyan }">{{ s.value }}</div>
-          <div class="stat-label">{{ s.label }}</div>
+      <!-- ===== 状态条:公司现在是什么情况,一行说清 ===== -->
+      <section class="hud glass">
+        <div class="hud-state">
+          <span class="hud-dot" :class="dotClass"></span>
+          <div class="hud-text">
+            <b>{{ headline }}</b>
+            <span>{{ subline }}</span>
+          </div>
         </div>
-        <div class="stat glass cycle-stat">
-          <el-button type="primary" size="small" :loading="cycling" @click="runCycle">
+
+        <div class="hud-metrics">
+          <div v-for="m in metrics" :key="m.k" class="hm" :class="{ 'is-hot': m.hot, 'is-warn': m.warn }">
+            <span class="hm-v">{{ m.v }}</span>
+            <span class="hm-k">{{ m.k }}</span>
+          </div>
+        </div>
+
+        <div class="hud-act">
+          <el-button size="small" :loading="loading" @click="load">刷新</el-button>
+          <el-button size="small" type="primary" plain :loading="cycling" @click="runCycle">
             {{ ceoRunning ? '巡视中…' : '立即巡视' }}
           </el-button>
-          <div class="stat-label">CEO 已巡视 {{ cycleCount }} 轮</div>
         </div>
-      </div>
+      </section>
 
-      <!-- 创始人指挥台 -->
-      <div class="command glass">
-        <span v-if="noProvider" class="no-key" @click="$router.push('/settings')" title="CEO 和所有岗位都还无法开工">
-          ⚙ 未配置大模型 API——去设置页点亮引擎
-        </span>
-        <span v-if="stats.budgetExceeded" class="budget-warn" title="今日 token 预算已用尽,CEO 自动巡视已暂停">
-          ⚠ 预算已用尽
-        </span>
-        <span v-if="stale" class="stale-note" title="最近一次刷新没成功,看到的是上一次的结果">数据可能陈旧</span>
-        <el-input v-model="goalText" placeholder="给公司一个目标,CEO 立即拆解并派活" size="small" class="cmd-input" @keyup.enter="submitGoal" />
-        <el-button size="small" type="primary" plain :disabled="!goalText.trim()" :loading="creating" @click="submitGoal">下达</el-button>
-        <el-button size="small" text class="feed-btn" @click="$router.push('/')">目标指挥台</el-button>
-        <el-divider direction="vertical" />
-        <el-input v-model="feedbackText" placeholder="纠偏指令(路走歪了就写这里)" size="small" class="cmd-input warn" />
-        <el-button size="small" class="warn-btn" :disabled="!feedbackText.trim()" @click="submitFeedback">纠偏</el-button>
-        <span v-if="openItems.length" class="pend-chip" title="点一下定位到需复核列" @click="focusReview">
-          {{ openItems.length }} 件待拍板
-        </span>
-      </div>
+      <!-- ===== 在办目标:公司到底在为什么干活 ===== -->
+      <section v-if="goalList.length" class="goals glass">
+        <div class="goals-head">
+          <h3>在办目标</h3>
+          <span class="goals-sub">进度按已通过评审的交付物算,点一下进项目现场</span>
+        </div>
+        <div class="goal-list">
+          <button v-for="row in goalList" :key="row.goal.id" class="goal"
+                  :class="{ 'is-need': needCount(row) }" @click="$router.push('/goals/' + row.goal.id)">
+            <div class="goal-line">
+              <span class="goal-status" :class="'gs-' + (row.goal.status || '').toLowerCase()">{{ goalStatus(row.goal.status) }}</span>
+              <span class="goal-title">{{ row.goal.title }}</span>
+              <span class="goal-pct">{{ row.goal.progress || 0 }}<i>%</i></span>
+            </div>
+            <div class="goal-bar"><i :style="{ width: (row.goal.progress || 0) + '%' }"></i></div>
+            <div class="goal-meta">
+              <span>{{ row.done }}/{{ row.deliverables }} 交付</span>
+              <span>{{ row.artifacts }} 份成果</span>
+              <span v-if="row.goal.finalScore">均分 {{ row.goal.finalScore }}</span>
+              <span v-if="row.blocked" class="bad">受阻 {{ row.blocked }}</span>
+              <span v-if="needCount(row)" class="bad need">待你补 {{ needCount(row) }} 项</span>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <!-- ===== 指挥:下目标 / 纠偏 ===== -->
+      <section class="command glass">
+        <div class="cmd-row">
+          <span class="cmd-label">下目标</span>
+          <el-input v-model="goalText" placeholder="一句话说清要什么、给谁看、怎样算成" size="default"
+                    class="cmd-input" @keyup.enter="submitGoal" />
+          <el-button type="primary" :disabled="!goalText.trim()" :loading="creating" @click="submitGoal">下达</el-button>
+        </div>
+        <div class="cmd-row sub">
+          <span class="cmd-label">纠偏</span>
+          <el-input v-model="feedbackText" placeholder="路走歪了就写这里,CEO 下一轮会读到" size="small"
+                    class="cmd-input" @keyup.enter="submitFeedback" />
+          <el-button size="small" :disabled="!feedbackText.trim()" @click="submitFeedback">发出</el-button>
+        </div>
+        <p v-if="noProvider" class="cmd-alert" @click="$router.push('/settings')">
+          ⚙ 还没配置大模型 API,CEO 和所有岗位都开不了工 —— 去设置页点亮引擎
+        </p>
+        <p v-else-if="stats.budgetExceeded" class="cmd-alert warn">⚠ 今日 token 预算已用尽,自动巡视已暂停</p>
+      </section>
+
+      <!-- ===== 等你拍板:不在泳道里,它是消息不是任务 ===== -->
+      <section v-if="openItems.length" class="decide glass">
+        <div class="decide-head">
+          <span class="decide-tag">等你拍板</span>
+          <b>{{ openItems.length }} 件</b>
+          <span class="decide-sub">需要你点头或补料的事,不处理会一直挡在路上</span>
+        </div>
+        <div class="decide-list">
+          <article v-for="a in openItems.slice(0, 6)" :key="a.id" class="decide-item" :class="'t-' + a.type.toLowerCase()">
+            <div class="di-top">
+              <span class="di-type">{{ typeMap[a.type] || a.type }}</span>
+              <span class="di-time">{{ fmt(a.createdAt) }}</span>
+            </div>
+            <p class="di-text">{{ a.content }}</p>
+            <div class="di-foot">
+              <router-link v-if="a.goalId" class="di-go" :to="'/goals/' + a.goalId">去处理 →</router-link>
+              <button class="di-ack" @click="ack(a)">知道了</button>
+            </div>
+          </article>
+        </div>
+      </section>
 
       <!-- 看板取不到时说明原因,而不是留四条空泳道 -->
       <div v-if="loadError" class="board-fail glass">
@@ -42,24 +101,21 @@
         <el-button size="small" plain :loading="loading" @click="load">重试</el-button>
       </div>
 
-      <!-- 任务看板 -->
+      <!-- ===== 任务流 ===== -->
       <div v-else class="lanes">
-        <div class="lane" v-for="lane in lanes" :key="lane.status"
-             :class="{ 'is-recv': recvLanes.has(lane.status), 'is-work': lane.status === 'RUNNING' && lane.items.length }">
+        <div class="lane" v-for="lane in lanes" :key="lane.status" :class="'lk-' + lane.status.toLowerCase()">
           <div class="lane-head">
             <span class="lane-title">{{ lane.label }}</span>
             <span class="lane-count">{{ lane.items.length }}</span>
           </div>
-          <transition-group tag="div" name="mv" class="lane-body">
-            <div v-if="!lane.items.length" key="__empty" class="lane-empty">—</div>
+          <div class="lane-body">
+            <div v-if="!lane.items.length" class="lane-empty">{{ lane.empty }}</div>
             <div v-for="t in lane.items" :key="t.id" class="card"
                  :class="{ 'm-land': flashIds.has(t.id) }" @click="openTask(t)">
               <div class="card-line">
-                <span class="card-id">
-                  #{{ t.id }}
-                  <i v-if="t.kind === 'WORK'" class="kind-badge kb-work">交付</i>
-                  <i v-else-if="t.kind === 'REVIEW'" class="kind-badge kb-review">评审</i>
-                </span>
+                <span class="card-id">#{{ t.id }}</span>
+                <i v-if="t.kind === 'WORK'" class="kind-badge kb-work">交付</i>
+                <i v-else-if="t.kind === 'REVIEW'" class="kind-badge kb-review">评审</i>
                 <span class="card-emp" :style="{ color: deptColor(t) }">{{ t.employee?.name }}</span>
               </div>
               <div class="card-inst">
@@ -69,57 +125,27 @@
               <div v-if="t.status === 'RUNNING'" class="task-prog"><i></i></div>
               <div class="card-time">{{ fmt(t.createdAt) }}</div>
             </div>
-          </transition-group>
-        </div>
-
-        <!-- 需复核:等你拍板的事独立成列,不沉在动态角落里 -->
-        <div class="lane lane-review" ref="reviewEl" :class="{ 'is-recv': reviewHot }">
-          <div class="lane-head">
-            <span class="lane-title">需复核</span>
-            <span class="lane-count">{{ openItems.length }}</span>
           </div>
-          <transition-group tag="div" name="mv" class="lane-body">
-            <div v-if="!openItems.length" key="__empty" class="lane-empty">—</div>
-            <div v-for="a in openItems" :key="'e' + a.id" class="card esc-card">
-              <div class="card-line">
-                <span class="card-id">#{{ a.id }}</span>
-                <span class="esc-tag">{{ typeMap[a.type] || a.type }}</span>
-              </div>
-              <div class="card-inst">{{ a.content }}</div>
-              <div class="esc-foot">
-                <span class="card-time">{{ fmt(a.createdAt) }}</span>
-                <el-button text size="small" class="ack-btn" @click.stop="ack(a)">
-                  {{ a.type === 'ESCALATION' ? '已拍板' : '关闭' }}
-                </el-button>
-              </div>
-            </div>
-          </transition-group>
         </div>
       </div>
-    </div><!-- /board-main -->
+    </div>
 
-    <!-- 实时动态常驻右侧:WebSocket 事件一到就补进列表并落一下 -->
+    <!-- ===== 实时动态:常驻右侧 ===== -->
     <aside class="feed-rail glass">
       <div class="rail-head">
         <span class="rail-title">实时动态</span>
-        <el-button text size="small" class="feed-refresh" :loading="loading" @click="load">刷新</el-button>
-      </div>
-      <div class="rail-meta">
-        <span>CEO 已巡视 {{ cycleCount }} 轮</span>
-        <span v-if="openItems.length" class="rail-badge">{{ openItems.length }} 件待拍板</span>
+        <span class="rail-meta">巡视 {{ cycleCount }} 轮</span>
       </div>
       <div class="feed-body">
         <div v-if="!activities.length" class="feed-empty">暂无动态</div>
-        <transition-group tag="div" name="mv" class="rail-list">
-          <article v-for="a in railItems" :key="a.id" class="feed-item"
-                   :class="['t-' + a.type.toLowerCase(), { 'is-new': newActs.has(a.id) }]">
-            <div class="feed-line">
-              <span class="feed-tag">{{ typeMap[a.type] || a.type }}</span>
-              <span class="feed-time">{{ fmt(a.createdAt) }}</span>
-            </div>
-            <div class="feed-content">{{ a.content }}</div>
-          </article>
-        </transition-group>
+        <article v-for="a in railItems" :key="a.id" class="feed-item"
+                 :class="['t-' + a.type.toLowerCase(), { 'is-new': newActs.has(a.id), 'is-open': a.status === 'OPEN' }]">
+          <div class="feed-line">
+            <span class="feed-tag">{{ typeMap[a.type] || a.type }}</span>
+            <span class="feed-time">{{ fmt(a.createdAt) }}</span>
+          </div>
+          <div class="feed-content">{{ a.content }}</div>
+        </article>
       </div>
     </aside>
 
@@ -135,6 +161,7 @@ import { motionOk } from '../utils/motion'
 import TaskDetail from '../components/TaskDetail.vue'
 
 const tasks = ref([])
+const goals = ref([])
 const stats = ref({})
 const noProvider = ref(false)
 const activities = ref([])
@@ -144,55 +171,111 @@ const cycling = ref(false)
 const creating = ref(false)
 const goalText = ref('')
 const feedbackText = ref('')
-const reviewEl = ref(null)
 const taskOpen = ref(false)
 const openedTaskId = ref(null)
 const loadError = ref('')
 const loading = ref(false)
-const stale = ref(false)
 const newActs = ref(new Set())
-const reviewHot = ref(false)
 
-/* 需复核 = 还挂着 OPEN、需要创始人点头的动态 */
+const typeMap = { GOAL: '目标', FEEDBACK: '纠偏', REPORT: '进展', ESCALATION: '上报' }
+
+/* 需要创始人处理的事:挂着 OPEN 的上报/纠偏 */
 const openItems = computed(() =>
   activities.value.filter(a => a.status === 'OPEN' && ['ESCALATION', 'GOAL', 'FEEDBACK'].includes(a.type)))
 const railItems = computed(() => activities.value.slice(0, 60))
 
-function focusReview() {
-  if (!reviewEl.value) return
-  reviewEl.value.scrollIntoView({ behavior: motionOk() ? 'smooth' : 'auto', block: 'nearest', inline: 'center' })
-  reviewHot.value = true
-  setTimeout(() => { reviewHot.value = false }, 1100)
+/* 目标按「有事要处理」优先、再看更新时间排,已完成沉底 */
+const goalList = computed(() => {
+  const rank = s => ({ REVIEW: 0, ACTIVE: 1, PLANNING: 1, PAUSED: 2, FAILED: 2, DONE: 3 }[s] ?? 1)
+  return [...goals.value]
+    .sort((a, b) => (rank(a.goal.status) - rank(b.goal.status))
+      || String(b.goal.updatedAt || '').localeCompare(String(a.goal.updatedAt || '')))
+    .slice(0, 6)
+})
+
+function needCount(row) {
+  const raw = row.goal?.needsInput
+  if (!raw) return 0
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter(Boolean).length : 0
+  } catch (e) {
+    return String(raw).split('\n').filter(Boolean).length
+  }
+}
+function goalStatus(s) {
+  return { PLANNING: '拆解中', ACTIVE: '推进中', REVIEW: '待复核', DONE: '已归档', PAUSED: '已暂停', FAILED: '失败' }[s] || s || '—'
 }
 
-const typeMap = { GOAL: '目标', FEEDBACK: '纠偏', REPORT: 'CEO', ESCALATION: '上报' }
+/* ===== 状态条:一句话 + 六个数字 ===== */
+const dotClass = computed(() => {
+  if (loadError.value) return 'is-bad'
+  if (noProvider.value) return 'is-bad'
+  if ((stats.value.running || 0) > 0) return 'is-run'
+  return 'is-on'
+})
+const headline = computed(() => {
+  if (loadError.value) return '看不到公司的实时状态'
+  if (noProvider.value) return '公司还没通电'
+  if (ceoRunning.value) return 'CEO 正在巡视'
+  const n = stats.value.running || 0
+  if (n > 0) return `正在施工 · ${n} 项并行`
+  if (openItems.value.length) return `${openItems.value.length} 件事等你拍板`
+  return '系统在线,随时可以下目标'
+})
+const subline = computed(() => {
+  if (loadError.value) return loadError.value
+  if (noProvider.value) return '去「设置」填一个大模型服务商,整条生产线才会动'
+  const done = stats.value.deliverablesDone || 0
+  const total = stats.value.deliverables || 0
+  const parts = []
+  if (total) parts.push(`交付 ${done}/${total}`)
+  if (stats.value.deliverablesWaiting) parts.push(`${stats.value.deliverablesWaiting} 项等上游`)
+  if (stats.value.goalsNeedInput) parts.push(`${stats.value.goalsNeedInput} 个目标缺料`)
+  parts.push(`门槛 ${stats.value.qualityThreshold || '—'} 分`)
+  return parts.join(' · ')
+})
+
+function fmtTokens(n) {
+  n = n || 0
+  return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
+}
+const metrics = computed(() => {
+  const st = stats.value
+  return [
+    { k: '在跑', v: st.running ?? 0, hot: (st.running || 0) > 0 },
+    { k: '待办', v: st.pending ?? 0 },
+    { k: '今日完成', v: st.doneToday ?? 0 },
+    { k: '待你处理', v: openItems.value.length + (st.goalsNeedInput || 0), warn: (openItems.value.length + (st.goalsNeedInput || 0)) > 0 },
+    { k: '成果', v: st.artifactsApproved ?? 0 },
+    { k: '今日 token', v: fmtTokens(st.tokensToday) }
+  ]
+})
 
 function deptColor(t) {
   const key = t.employee?.department?.colorKey
   return { product: 'var(--dept-product)', tech: 'var(--dept-tech)', design: 'var(--dept-design)', market: 'var(--dept-market)', ops: 'var(--dept-ops)' }[key] || 'var(--text-dim)'
 }
 
-/* ===== 施工动效:卡片换道时落地,接住卡片的泳道亮一下 ===== */
+/* 卡片换道时亮一下:只保留这一处动效,用来指出"刚刚发生了什么" */
 const flashIds = ref(new Set())
-const recvLanes = ref(new Set())
 let prevTaskStatus = new Map()
-let prevLaneCounts = {}
 let boardFirstLoad = true
 let flashTimer = null
 
 function diffBoard(list) {
-  const nextStatus = new Map(list.map(t => [t.id, t.status]))
+  const next = new Map(list.map(t => [t.id, t.status]))
   if (boardFirstLoad || !motionOk()) {
-    prevTaskStatus = nextStatus
+    prevTaskStatus = next
     boardFirstLoad = false
     return
   }
   const moved = new Set()
-  for (const [id, st] of nextStatus) {
+  for (const [id, st] of next) {
     const before = prevTaskStatus.get(id)
     if (before && before !== st) moved.add(id)
   }
-  prevTaskStatus = nextStatus
+  prevTaskStatus = next
   if (moved.size) {
     flashIds.value = moved
     clearTimeout(flashTimer)
@@ -200,61 +283,11 @@ function diffBoard(list) {
   }
 }
 
-const statPulse = ref(new Set())
-let prevStatVals = null
-
-function pulseStats(st) {
-  const next = {
-    '今日完成': st.doneToday ?? 0, '执行中': st.running ?? 0,
-    '今日 token': fmtTokens(st.tokensToday), '累计 token': fmtTokens(st.tokensTotal),
-    '失败待复盘': st.failed ?? 0
-  }
-  if (prevStatVals && motionOk()) {
-    const hot = new Set()
-    for (const k of Object.keys(next)) if (prevStatVals[k] !== undefined && prevStatVals[k] !== next[k]) hot.add(k)
-    if (hot.size) {
-      statPulse.value = hot
-      setTimeout(() => { statPulse.value = new Set() }, 700)
-    }
-  }
-  prevStatVals = next
-}
-
-function noteLaneCounts(list) {
-  const counts = { PENDING: 0, RUNNING: 0, DONE: 0, FAILED: 0 }
-  for (const t of list) {
-    if (t.status === 'FAILED' || t.status === 'CANCELLED') counts.FAILED++
-    else if (counts[t.status] !== undefined) counts[t.status]++
-  }
-  if (motionOk()) {
-    const hot = new Set()
-    for (const k of Object.keys(counts)) if (prevLaneCounts[k] !== undefined && counts[k] > prevLaneCounts[k]) hot.add(k)
-    if (hot.size) {
-      recvLanes.value = hot
-      setTimeout(() => { recvLanes.value = new Set() }, 1100)
-    }
-  }
-  prevLaneCounts = counts
-}
-
 const lanes = computed(() => [
-  { status: 'PENDING', label: '待处理', items: tasks.value.filter(t => t.status === 'PENDING') },
-  { status: 'RUNNING', label: '执行中', items: tasks.value.filter(t => t.status === 'RUNNING') },
-  { status: 'DONE', label: '完成', items: tasks.value.filter(t => t.status === 'DONE') },
-  { status: 'FAILED', label: '失败 · 已取消', items: tasks.value.filter(t => t.status === 'FAILED' || t.status === 'CANCELLED') }
-])
-
-function fmtTokens(n) {
-  n = n || 0
-  return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
-}
-
-const statCards = computed(() => [
-  { label: '今日完成', value: stats.value.doneToday ?? 0, color: 'var(--dept-ops)' },
-  { label: '执行中', value: stats.value.running ?? 0, color: 'var(--glow-cyan)', cyan: true },
-  { label: '今日 token', value: fmtTokens(stats.value.tokensToday), cyan: true },
-  { label: '累计 token', value: fmtTokens(stats.value.tokensTotal) },
-  { label: '失败待复盘', value: stats.value.failed ?? 0, color: 'var(--st-error)' }
+  { status: 'PENDING', label: '待处理', empty: '队列是空的', items: tasks.value.filter(t => t.status === 'PENDING') },
+  { status: 'RUNNING', label: '执行中', empty: '没有任务在跑', items: tasks.value.filter(t => t.status === 'RUNNING') },
+  { status: 'DONE', label: '完成', empty: '还没有完成的', items: tasks.value.filter(t => t.status === 'DONE') },
+  { status: 'FAILED', label: '失败 · 取消', empty: '没有失败', items: tasks.value.filter(t => t.status === 'FAILED' || t.status === 'CANCELLED') }
 ])
 
 function openTask(t) {
@@ -265,21 +298,20 @@ function fmt(iso) {
   if (!iso) return ''
   return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
 }
-
 function failText(e) {
   return e && (e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT')
     ? '后端长时间没有响应' : '后端可能没有响应'
 }
 
-/* 任务与统计各取各的:一边挂了不能把另一边一起拖成 0,更不能拖掉实时订阅 */
+/* 三个接口各取各的:一个挂了不该把另两个一起拖成空 */
 async function load() {
   loading.value = true
   const settle = p => p.then(v => ({ v }), e => ({ e }))
-  const [tk, st] = await Promise.all([settle(api.tasks()), settle(api.stats())])
-  if (tk.v) { tasks.value = tk.v; diffBoard(tk.v); noteLaneCounts(tk.v) }
-  if (st.v) { pulseStats(st.v); stats.value = st.v; noProvider.value = st.v.hasProvider === false }
+  const [tk, st, gl] = await Promise.all([settle(api.tasks()), settle(api.stats()), settle(api.goals())])
+  if (tk.v) { tasks.value = tk.v; diffBoard(tk.v) }
+  if (st.v) { stats.value = st.v; noProvider.value = st.v.hasProvider === false }
+  if (gl.v) goals.value = gl.v
   loadError.value = (tk.v || st.v) ? '' : `看板载入失败:${failText(tk.e || st.e)}`
-  stale.value = Boolean((tk.v && st.e) || (st.v && tk.e))
   loading.value = false
   try {
     const feed = await api.opsFeed()
@@ -287,10 +319,9 @@ async function load() {
     activities.value = feed.activities || []
     ceoRunning.value = feed.ceoRunning || false
     cycleCount.value = feed.cycleCount || 0
-  } catch (e) { /* feed 接口不可用时忽略 */ }
+  } catch (e) { /* feed 接口不可用时保留上一次的动态 */ }
 }
 
-/* 动态栏是常驻的,所以新事件必须自己跳出来:标蓝一下再退回常态 */
 let prevActIds = null
 let actTimer = null
 function diffFeed(list) {
@@ -354,7 +385,6 @@ async function runCycle() {
 let off = null
 let timer = null
 onMounted(() => {
-  /* 订阅先建立,再取数:取数失败只是暂时没数据,实时通道必须一直在 */
   off = bus.on(evt => {
     if (['task-update', 'ceo-status', 'escalation', 'ceo-cycle', 'goal-update', 'goal-completed'].includes(evt.type)) {
       clearTimeout(timer)
@@ -372,184 +402,221 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 左侧看流程,右侧看动态:一屏之内既知道卡在哪,也知道刚发生了什么 */
-.board { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 16px; height: calc(100vh - 140px); }
-.board-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
-.stat-row { display: flex; gap: 14px; }
-.stat { flex: 1; padding: 16px 18px 13px; text-align: center; position: relative; overflow: hidden;
-        transition: border-color .4s var(--ease-quiet); }
-.stat:hover { border-color: rgba(var(--rgb-glow), .22); }
-.stat::after {
-  content: ""; position: absolute; left: 30%; right: 30%; bottom: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--glow-cyan-dim), transparent);
-  opacity: .5;
-}
-.stat-num { font-size: 26px; font-weight: 200; font-family: var(--font-mono); }
-.stat-num.cyan { color: var(--glow-cyan); text-shadow: 0 0 14px rgba(var(--rgb-glow), .3); }
-.stat-label { font-size: 10.5px; color: var(--text-dim); letter-spacing: .26em; margin-top: 6px; margin-left: .26em; }
-.cycle-stat { display: flex; flex-direction: column; justify-content: center; align-items: center; }
+/* ===== 版式:左边干活,右边看发生了什么 ===== */
+.board { display: grid; grid-template-columns: minmax(0, 1fr) 322px; gap: 14px; align-items: start; }
+.board-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-.command { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
-.budget-warn { flex: none; font-size: 11px; color: var(--st-warn); border: 1px solid rgba(var(--rgb-warn), .4);
-               border-radius: 999px; padding: 3px 10px; animation: badgePulse 2.2s ease-in-out infinite; }
-@keyframes badgePulse { 0%,100% { box-shadow: 0 0 4px rgba(var(--rgb-warn), .15); } 50% { box-shadow: 0 0 14px rgba(var(--rgb-warn), .35); } }
-.cmd-input { flex: 1; }
-.cmd-input.warn :deep(.el-input__inner) { color: var(--st-warn); }
-.warn-btn { color: var(--st-warn); }
-.feed-btn { color: var(--glow-cyan); letter-spacing: .15em; }
+/* ===== 状态条 ===== */
+.hud { display: flex; align-items: center; gap: 24px; padding: 16px 20px; }
+.hud-state { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+.hud-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-faint); }
+.hud-dot.is-on { background: var(--glow-cyan); box-shadow: 0 0 10px rgba(var(--rgb-glow), .55); }
+.hud-dot.is-run { background: var(--warm); box-shadow: 0 0 12px rgba(var(--rgb-warm), .6); animation: breathe 2.2s var(--ease-quiet) infinite; }
+.hud-dot.is-bad { background: var(--st-error); box-shadow: 0 0 10px rgba(var(--rgb-error), .55); }
+.hud-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hud-text b { font-size: 14.5px; font-weight: 400; letter-spacing: .08em; color: var(--text-moon); }
+.hud-text span { font-size: 11px; color: var(--text-faint); letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-metrics { display: flex; align-items: stretch; gap: 0; flex: none; }
+.hm {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 0 16px; border-left: 1px solid var(--border-hair);
+}
+.hm-v { font-family: var(--font-mono); font-size: 19px; font-weight: 300; color: var(--text-moon); font-variant-numeric: tabular-nums; }
+.hm-k { font-size: 9.5px; letter-spacing: .16em; color: var(--text-faint); white-space: nowrap; }
+.hm.is-hot .hm-v { color: var(--glow-cyan); }
+.hm.is-warn .hm-v { color: var(--st-warn); }
+.hud-act { display: flex; gap: 8px; flex: none; }
 
-.board-fail {
-  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 14px; text-align: center; padding: 32px;
-  animation: riseIn .5s var(--ease-out) both;
-}
-.board-fail p { margin: 0; font-size: 12.5px; line-height: 1.9; color: var(--text-dim); letter-spacing: .08em; }
-.fail-mark {
-  font-size: 30px; font-weight: 200; color: var(--st-error);
-  border: 1px dashed rgba(var(--rgb-error), .4); width: 68px; height: 68px; border-radius: 18px;
-  display: grid; place-items: center;
-}
-.stale-note { font-size: 11px; letter-spacing: .06em; color: var(--st-warn); flex: none; }
-
-.lanes { flex: 1; display: flex; gap: 16px; min-height: 0; }
-.lane { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0;
-        transform: translateZ(0); /* 修复部分 GPU 环境下普通内容不合成绘制的问题 */
-        background: linear-gradient(170deg, rgba(var(--rgb-panel), .6), rgba(var(--rgb-surface-2), .66));
-        border: 1px solid rgba(var(--rgb-ink), .09); border-radius: 14px;
-        padding: 12px 10px 14px; }
-.lane-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 8px 12px; }
-.lane-title { font-size: 13.5px; letter-spacing: .3em; color: rgba(var(--rgb-ink), .8); }
-.lane-count { font-family: var(--font-mono); font-size: 11px; color: var(--glow-cyan);
-              border: 1px solid rgba(var(--rgb-glow), .3); border-radius: 999px; padding: 1px 9px; }
-.lane-body { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px 4px 4px; }
-/* 接到新卡片:泳道亮一下,告诉创始人「这一步刚跑完」 */
-.lane.is-recv { border-color: rgba(var(--rgb-glow), .34); }
-.lane.is-recv .lane-count { animation: popScore .55s cubic-bezier(.34, 1.56, .64, 1) both; }
-.lane.is-recv::before {
-  content: ""; position: absolute; left: 10px; right: 10px; top: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--glow-cyan), transparent);
-  animation: recvFlash 1.1s var(--ease-out) both;
-}
-@keyframes recvFlash {
-  0% { opacity: 0; transform: scaleX(.3); }
-  35% { opacity: 1; transform: scaleX(1); }
-  100% { opacity: 0; }
-}
-/* 执行中:整条泳道有一道慢扫的光,一眼看出公司在动 */
-.lane.is-work { position: relative; overflow: hidden; }
-.lane.is-work::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 40%; pointer-events: none;
-  background: linear-gradient(180deg, rgba(var(--rgb-glow), .07), transparent);
-  animation: liveSweep 4.2s var(--ease-quiet) infinite;
-}
-@keyframes liveSweep {
-  0% { transform: translateY(-110%); opacity: 0; }
-  22% { opacity: .95; }
-  100% { transform: translateY(300%); opacity: 0; }
-}
-.stat.is-pulse .stat-num { animation: popScore .6s cubic-bezier(.34, 1.56, .64, 1) both; }
-.lane-empty { text-align: center; color: var(--text-faint); padding: 34px 0; letter-spacing: .2em; }
-.card { padding: 12px 14px; cursor: pointer;
-        background: linear-gradient(155deg, rgba(var(--rgb-raise), .92), rgba(var(--rgb-panel-hi), .94));
-        border: 1px solid rgba(var(--rgb-ink), .13);
-        border-radius: 12px;
-        transition: border-color .35s var(--ease-quiet), transform .35s var(--ease-out); }
-.card:hover { border-color: rgba(var(--rgb-glow), .25); transform: translateY(-2px); }
-.card-line { display: flex; justify-content: space-between; }
-.card-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
-.kind-badge { font-style: normal; font-family: var(--font-sans); font-size: 8.5px; letter-spacing: .08em;
-              padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
-.kb-work { color: var(--glow-cyan-dim); background: var(--glow-cyan-faint); }
-.kb-review { color: var(--st-warn); background: rgba(var(--rgb-warn), .1); }
-.card-emp { font-size: 12px; color: var(--glow-cyan-dim); letter-spacing: .1em; }
-.card-inst { font-size: 12.5px; margin-top: 6px; line-height: 1.7; overflow: hidden;
-             display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.card-time { font-size: 10.5px; color: var(--text-faint); margin-top: 8px; font-family: var(--font-mono); }
-.card-chain { color: var(--glow-cyan-dim); font-family: var(--font-mono); font-size: 11px; margin-right: 6px; }
-
-/* ===== 需复核列:与泳道同构,但用琥珀色说明「这是等你的」 ===== */
-.lane-review { background: linear-gradient(170deg, rgba(var(--rgb-warn), .05), rgba(var(--rgb-surface-2), .66)); }
-.lane-review .lane-count { color: var(--st-warn); border-color: rgba(var(--rgb-warn), .34); }
-.lane-review.is-recv { border-color: rgba(var(--rgb-warn), .45); }
-.esc-card { cursor: default; }
-.esc-card:hover { transform: none; }
-.esc-tag { font-size: 9.5px; letter-spacing: .18em; padding: 1px 8px; border-radius: 999px;
-           color: var(--st-warn); background: rgba(var(--rgb-warn), .12); }
-.esc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
-.esc-foot .card-time { margin-top: 0; }
-.pend-chip {
-  flex: none; font-size: 10.5px; letter-spacing: .12em; color: var(--st-warn); cursor: pointer;
-  border: 1px solid rgba(var(--rgb-warn), .34); border-radius: 999px; padding: 3px 10px;
+/* ===== 在办目标 ===== */
+.goals { padding: 14px 18px 16px; }
+.goals-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.goals-head h3 { margin: 0; font-size: 12.5px; font-weight: 400; letter-spacing: .22em; color: var(--text-moon); }
+.goals-sub { font-size: 10.5px; color: var(--text-faint); }
+.goal-list { display: flex; flex-direction: column; gap: 2px; }
+.goal {
+  appearance: none; text-align: left; cursor: pointer; background: none; border: 0; width: 100%;
+  padding: 10px 10px 9px; border-radius: 9px;
   transition: background .3s var(--ease-quiet);
 }
-.pend-chip:hover { background: rgba(var(--rgb-warn), .1); }
-
-/* ===== 常驻实时动态 ===== */
-.feed-rail { display: flex; flex-direction: column; min-height: 0; padding: 14px 12px 0; }
-.rail-head { display: flex; justify-content: space-between; align-items: center; }
-.feed-refresh { color: var(--text-dim); }
-.rail-title { font-size: 14px; letter-spacing: .3em; color: var(--glow-cyan-dim); }
-.rail-meta { display: flex; align-items: center; gap: 10px; margin: 8px 0 12px;
-             font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--text-faint); }
-.rail-badge { color: var(--st-warn); border: 1px solid rgba(var(--rgb-warn), .3); border-radius: 999px; padding: 1px 8px; }
-.rail-list { display: flex; flex-direction: column; gap: 10px; }
-.feed-item { animation: riseIn .5s var(--ease-out) both; }
-.feed-item.is-new {
-  animation: railLand 1.7s var(--ease-out) both;
-  border-color: rgba(var(--rgb-glow), .4);
+.goal:hover { background: var(--tint-soft); }
+.goal.is-need { background: rgba(var(--rgb-warn), .045); }
+.goal.is-need:hover { background: rgba(var(--rgb-warn), .08); }
+.goal-line { display: flex; align-items: center; gap: 10px; }
+.goal-status {
+  flex: none; font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em;
+  border-radius: 4px; padding: 2px 7px; color: var(--text-dim); background: var(--chip-bg);
 }
-@keyframes railLand {
-  0% { opacity: 0; transform: translateY(-12px); box-shadow: 0 0 0 1px rgba(var(--rgb-glow), .55), 0 0 22px rgba(var(--rgb-glow), .22); }
-  22% { opacity: 1; transform: none; }
-  70% { box-shadow: 0 0 0 1px rgba(var(--rgb-glow), .3), 0 0 14px rgba(var(--rgb-glow), .12); }
+.gs-active, .gs-planning { color: var(--glow-cyan); background: var(--glow-cyan-faint); }
+.gs-review { color: var(--st-warn); background: rgba(var(--rgb-warn), .12); }
+.gs-done { color: var(--st-ok); background: rgba(var(--rgb-ok), .1); }
+.gs-failed { color: var(--st-error); background: rgba(var(--rgb-error), .1); }
+.goal-title {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--text-moon); letter-spacing: .02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.goal-pct { font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.goal-pct i { font-style: normal; font-size: 9px; opacity: .6; margin-left: 1px; }
+.goal-bar { height: 2px; border-radius: 2px; background: var(--border-hair); margin: 8px 0 6px; overflow: hidden; }
+.goal-bar i { display: block; height: 100%; background: linear-gradient(90deg, rgba(var(--rgb-glow), .5), var(--glow-cyan)); transition: width .7s var(--ease-out); }
+.goal.is-need .goal-bar i { background: linear-gradient(90deg, rgba(var(--rgb-warn), .5), var(--st-warn)); }
+.goal-meta { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em; color: var(--text-faint); }
+.goal-meta .bad { color: var(--st-error); }
+.goal-meta .need { color: var(--st-warn); }
+
+/* ===== 指挥 ===== */
+.command { display: flex; flex-direction: column; gap: 9px; padding: 13px 16px; }
+.cmd-row { display: flex; align-items: center; gap: 10px; }
+.cmd-row.sub { opacity: .92; }
+.cmd-label {
+  flex: none; width: 42px; font-size: 10.5px; letter-spacing: .18em; color: var(--text-faint);
+}
+.cmd-row.sub .cmd-label { color: var(--st-warn); opacity: .8; }
+.cmd-input { flex: 1; }
+.cmd-alert {
+  margin: 2px 0 0; font-size: 11px; letter-spacing: .04em; color: var(--st-warn); cursor: pointer;
+}
+.cmd-alert.warn { color: var(--st-warn); opacity: .85; }
+
+/* ===== 等你拍板 ===== */
+.decide { padding: 14px 18px 16px; border-color: rgba(var(--rgb-warn), .26); }
+.decide-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.decide-tag {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .2em; color: var(--st-warn);
+  border: 1px solid rgba(var(--rgb-warn), .38); border-radius: 999px; padding: 2px 10px;
+}
+.decide-head b { font-family: var(--font-mono); font-size: 13px; font-weight: 400; color: var(--st-warn); }
+.decide-sub { font-size: 10.5px; color: var(--text-faint); }
+.decide-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.decide-item {
+  border: 1px solid var(--border-hair); border-left: 2px solid rgba(var(--rgb-warn), .5);
+  border-radius: 9px; padding: 10px 12px; background: var(--tint-soft);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.decide-item.t-escalation { border-left-color: rgba(var(--rgb-error), .6); }
+.di-top { display: flex; align-items: center; gap: 8px; }
+.di-type { font-size: 9.5px; letter-spacing: .16em; color: var(--st-warn); }
+.di-time { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.di-text {
+  margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--text-dim);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.di-foot { display: flex; align-items: center; gap: 12px; }
+.di-go { font-size: 10.5px; color: var(--glow-cyan); text-decoration: none; letter-spacing: .06em; }
+.di-ack {
+  margin-left: auto; background: none; border: 0; cursor: pointer;
+  font-size: 10.5px; color: var(--text-faint); letter-spacing: .08em;
+}
+.di-ack:hover { color: var(--text-moon); }
+
+/* ===== 泳道 ===== */
+.lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.lane {
+  display: flex; flex-direction: column; min-width: 0; border-radius: 12px;
+  border: 1px solid var(--border-hair);
+  background: linear-gradient(175deg, rgba(var(--rgb-panel), .5), rgba(var(--rgb-surface-2), .6));
+  padding: 11px 9px 10px;
+}
+.lane-head { display: flex; align-items: center; gap: 8px; padding: 0 6px 9px; border-bottom: 1px solid var(--border-hair); }
+.lane-title { font-size: 11.5px; letter-spacing: .18em; color: rgba(var(--rgb-ink), .72); }
+.lane-count { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.lk-running .lane-title { color: var(--glow-cyan); }
+.lk-running .lane-count { color: var(--glow-cyan); }
+.lk-failed .lane-title { color: rgba(var(--rgb-error), .8); }
+.lane-body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 9px 3px 2px; max-height: 46vh; overflow: auto; }
+.lane-empty { text-align: center; color: var(--text-faint); font-size: 11px; padding: 26px 0; letter-spacing: .08em; }
+.card {
+  padding: 10px 11px; cursor: pointer; border-radius: 9px;
+  background: rgba(var(--rgb-panel-hi), .8);
+  border: 1px solid rgba(var(--rgb-ink), .1);
+  transition: border-color .3s var(--ease-quiet), transform .3s var(--ease-out);
+}
+.card:hover { border-color: rgba(var(--rgb-glow), .3); transform: translateY(-1px); }
+.card.m-land { animation: cardLand 1.3s var(--ease-out) both; }
+@keyframes cardLand {
+  0% { box-shadow: 0 0 0 1px rgba(var(--rgb-glow), .5); }
   100% { box-shadow: none; }
 }
+.card-line { display: flex; align-items: center; gap: 6px; }
+.card-id { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.kind-badge { font-style: normal; font-size: 8.5px; letter-spacing: .06em; padding: 1px 5px; border-radius: 999px; }
+.kb-work { color: var(--glow-cyan-dim); background: var(--glow-cyan-faint); }
+.kb-review { color: var(--st-warn); background: rgba(var(--rgb-warn), .1); }
+.card-emp { margin-left: auto; font-size: 11px; letter-spacing: .06em; }
+.card-inst {
+  font-size: 11.5px; margin-top: 5px; line-height: 1.65; color: var(--text-dim); overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+.card-chain { color: var(--glow-cyan-dim); font-family: var(--font-mono); font-size: 10px; margin-right: 4px; }
+.card-time { font-size: 9px; color: var(--text-faint); margin-top: 6px; font-family: var(--font-mono); }
+.task-prog { height: 2px; margin-top: 7px; border-radius: 2px; background: var(--border-hair); overflow: hidden; }
+.task-prog i { display: block; height: 100%; width: 40%; background: var(--glow-cyan); animation: prog 1.6s var(--ease-quiet) infinite; }
+@keyframes prog {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
 
-/* 动态列表 */
-.feed-body { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
-.feed-empty { text-align: center; color: var(--text-faint); padding: 60px 0; letter-spacing: .25em; }
-.feed-item { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hair); background: var(--tint-soft); }
-.feed-item.t-escalation { border-color: rgba(var(--rgb-error), .35); background: rgba(var(--rgb-error), .04); }
-.feed-item.t-goal { border-color: rgba(var(--rgb-glow), .3); }
-.feed-line { display: flex; align-items: center; gap: 12px; }
-.feed-tag { font-size: 10px; letter-spacing: .25em; padding: 1px 9px; border-radius: 999px;
-            background: var(--chip-bg); color: var(--text-dim); }
-.t-goal .feed-tag { background: var(--glow-cyan-faint); color: var(--glow-cyan); }
-.t-escalation .feed-tag { background: rgba(var(--rgb-error), .12); color: var(--st-error); }
-.t-feedback .feed-tag { background: rgba(var(--rgb-warn), .12); color: var(--st-warn); }
-.feed-time { font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
-.ack-btn { margin-left: auto; color: var(--glow-cyan); }
-.feed-content { margin-top: 8px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; }
+/* ===== 取数失败 ===== */
+.board-fail {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; text-align: center; padding: 48px 32px;
+}
+.board-fail p { margin: 0; font-size: 12.5px; line-height: 1.9; color: var(--text-dim); letter-spacing: .06em; }
+.fail-mark {
+  font-size: 26px; font-weight: 200; color: var(--st-error);
+  border: 1px dashed rgba(var(--rgb-error), .4); width: 60px; height: 60px; border-radius: 16px;
+  display: grid; place-items: center;
+}
 
-.stat-label { white-space: nowrap; }
-.lane-title { white-space: nowrap; }
+/* ===== 实时动态 ===== */
+.feed-rail {
+  display: flex; flex-direction: column; padding: 14px 12px 12px;
+  position: sticky; top: 92px; max-height: calc(100vh - 116px);
+}
+.rail-head { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 10px; border-bottom: 1px solid var(--border-hair); }
+.rail-title { font-size: 12.5px; letter-spacing: .26em; color: var(--text-moon); }
+.rail-meta { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.feed-body { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 4px 2px; }
+.feed-empty { text-align: center; color: var(--text-faint); padding: 48px 0; letter-spacing: .2em; font-size: 11.5px; }
+.feed-item { padding: 10px 12px; border-radius: 9px; border: 1px solid var(--border-hair); background: var(--tint-soft); }
+.feed-item.is-open { border-color: rgba(var(--rgb-warn), .28); }
+.feed-item.is-new { animation: feedIn 1.7s var(--ease-out) both; }
+@keyframes feedIn {
+  0% { opacity: 0; transform: translateY(-8px); border-color: rgba(var(--rgb-glow), .5); }
+  20% { opacity: 1; transform: none; }
+  100% { border-color: var(--border-hair); }
+}
+.feed-item.t-escalation { border-color: rgba(var(--rgb-error), .3); background: rgba(var(--rgb-error), .035); }
+.feed-line { display: flex; align-items: center; gap: 10px; }
+.feed-tag {
+  font-size: 9px; letter-spacing: .2em; padding: 1px 7px; border-radius: 999px;
+  background: var(--chip-bg); color: var(--text-faint);
+}
+.t-goal .feed-tag { color: var(--glow-cyan); background: var(--glow-cyan-faint); }
+.t-escalation .feed-tag { color: var(--st-error); background: rgba(var(--rgb-error), .12); }
+.t-feedback .feed-tag { color: var(--st-warn); background: rgba(var(--rgb-warn), .12); }
+.feed-time { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-faint); }
+.feed-content { margin-top: 6px; font-size: 11.5px; line-height: 1.7; color: var(--text-dim); white-space: pre-wrap; }
 
-@media (max-width: 1180px) {
-  /* 放不下右侧栏时改成上下堆叠:动态仍然常驻,只是换个位置 */
-  .board { grid-template-columns: 1fr; height: auto; }
-  .feed-rail { max-height: 440px; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+@media (max-width: 1240px) {
+  .board { grid-template-columns: 1fr; }
+  .feed-rail { position: static; max-height: 420px; }
+  .hud { flex-wrap: wrap; }
 }
-@media (max-width: 1100px) {
-  .command { flex-wrap: wrap; }
-  .command :deep(.el-divider--vertical) { display: none; }
-  .command .cmd-input { flex: 1 1 240px; min-width: 0; }
-  .budget-warn { margin-left: auto; }
+@media (max-width: 1000px) {
+  .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lane-body { max-height: 320px; }
+  .hud-metrics { flex-wrap: wrap; row-gap: 10px; }
 }
-@media (max-width: 900px) {
-  .board { height: auto; }
-  .stat-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-  .stat-label { letter-spacing: .16em; margin-left: .16em; }
-  .lanes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .lane { min-height: 280px; max-height: 420px; }
-}
-@media (max-width: 560px) {
-  .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat { padding: 12px 10px 10px; }
-  .stat-num { font-size: 22px; }
-  .command { padding: 10px 12px; gap: 8px; }
-}
-@media (max-width: 430px) {
+@media (max-width: 620px) {
+  .hud { gap: 14px; padding: 14px 15px; }
+  .hud-metrics { width: 100%; }
+  .hm { padding: 0 12px; }
+  .hm-v { font-size: 16px; }
   .lanes { grid-template-columns: 1fr; }
-  .lane { max-height: none; }
+  .lane-body { max-height: none; }
+  .cmd-row { flex-wrap: wrap; }
+  .cmd-label { width: auto; }
 }
 </style>

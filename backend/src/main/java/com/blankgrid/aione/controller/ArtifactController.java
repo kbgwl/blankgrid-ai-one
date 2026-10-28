@@ -2,12 +2,14 @@ package com.blankgrid.aione.controller;
 
 import com.blankgrid.aione.entity.Artifact;
 import com.blankgrid.aione.repo.ArtifactRepository;
+import com.blankgrid.aione.service.ExportService;
 import com.blankgrid.aione.service.GoalService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -22,10 +24,12 @@ public class ArtifactController {
 
     private final ArtifactRepository artRepo;
     private final GoalService goals;
+    private final ExportService exports;
 
-    public ArtifactController(ArtifactRepository artRepo, GoalService goals) {
+    public ArtifactController(ArtifactRepository artRepo, GoalService goals, ExportService exports) {
         this.artRepo = artRepo;
         this.goals = goals;
+        this.exports = exports;
     }
 
     @GetMapping
@@ -68,9 +72,18 @@ public class ArtifactController {
         return m;
     }
 
+    /** 单份成果直接写进设置页指定的落盘目录,不再走浏览器下载。 */
+    @PostMapping("/{id}/export-to-dir")
+    public Map<String, Object> exportToDir(@PathVariable Long id) {
+        try {
+            return exports.exportArtifact(id);
+        } catch (IOException e) {
+            return Map.of("ok", false, "error", "写盘失败:" + e.getMessage());
+        }
+    }
+
     @GetMapping("/{id}/download")
-    public ResponseEntity<byte[]> download(@PathVariable Long id) {
-        Artifact a = goals.artifact(id);
+    public ResponseEntity<byte[]> download(@PathVariable Long id) {        Artifact a = goals.artifact(id);
         String title = nz(a.getTitle()).isBlank() ? "artifact" : a.getTitle();
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(title).append("\n\n");

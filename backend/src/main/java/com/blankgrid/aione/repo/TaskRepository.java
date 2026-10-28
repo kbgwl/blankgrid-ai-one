@@ -10,6 +10,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findTop100ByEmployeeIdOrderByCreatedAtDesc(Long employeeId);
     long countByStatus(String status);
     long countByStatusAndCreatedAtAfter(String status, java.time.Instant after);
+    List<Task> findByStatus(String status);
 
     long countByEmployeeIdAndStatus(Long employeeId, String status);
     long countByEmployeeIdAndStatusAndCreatedAtAfter(Long employeeId, String status, java.time.Instant after);

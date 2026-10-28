@@ -70,6 +70,9 @@ public class StatsController {
                 .filter(e -> !e.isCeo() && !Employee.STATUS_DISABLED.equals(e.getStatus())).count());
         m.put("deliverables", delRepo.count());
         m.put("deliverablesDone", delRepo.findByStatusIn(List.of(Deliverable.DONE)).size());
+        m.put("deliverablesWaiting", delRepo.findByStatusIn(List.of(Deliverable.WAITING)).size());
+        m.put("goalsNeedInput", goals.stream()
+                .filter(g -> g.getNeedsInput() != null && !g.getNeedsInput().isBlank()).count());
         m.put("artifactsTotal", artRepo.count());
         m.put("artifactsApproved", artRepo.countByStatus(Artifact.APPROVED));
         m.put("qualityThreshold", settingsService.get().reviewThreshold);

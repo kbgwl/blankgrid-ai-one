@@ -1,5 +1,6 @@
 package com.blankgrid.aione.controller;
 
+import com.blankgrid.aione.service.ExportService;
 import com.blankgrid.aione.service.LlmService;
 import com.blankgrid.aione.service.SettingsService;
 import com.blankgrid.aione.service.SettingsService.Provider;
@@ -14,10 +15,13 @@ public class SettingsController {
 
     private final SettingsService settingsService;
     private final LlmService llmService;
+    private final ExportService exportService;
 
-    public SettingsController(SettingsService settingsService, LlmService llmService) {
+    public SettingsController(SettingsService settingsService, LlmService llmService,
+                              ExportService exportService) {
         this.settingsService = settingsService;
         this.llmService = llmService;
+        this.exportService = exportService;
     }
 
     @GetMapping
@@ -29,6 +33,12 @@ public class SettingsController {
     public Settings save(@RequestBody Settings incoming) {
         settingsService.save(incoming);
         return settingsService.masked();
+    }
+
+    /** 成果落盘目录的实际情况:是否存在、能不能写。设置页保存后立刻能看到成不成。 */
+    @GetMapping("/export")
+    public Map<String, Object> exportStatus() {
+        return exportService.status();
     }
 
     /**

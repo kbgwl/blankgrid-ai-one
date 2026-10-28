@@ -61,6 +61,17 @@ public class Goal {
     @Column(length = 4000)
     private String planNotes = "";
 
+    /**
+     * 待创始人补充的事实(JSON 数组)。CEO / 部门负责人 / 评审在缺少必须核实的外部事实时
+     * 上报到这里,而不是自己编一个数字或功能名。空串 = 没有待补事项。
+     */
+    @Column(length = 6000)
+    private String needsInput = "";
+
+    /** 创始人已确认的事实,会注入这个目标后续所有拆解、执行、评审提示词 */
+    @Column(length = 12000)
+    private String providedFacts = "";
+
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
 
@@ -91,6 +102,10 @@ public class Goal {
     public void setCeoSummary(String ceoSummary) { this.ceoSummary = ceoSummary; }
     public String getPlanNotes() { return planNotes; }
     public void setPlanNotes(String planNotes) { this.planNotes = planNotes; }
+    public String getNeedsInput() { return needsInput; }
+    public void setNeedsInput(String needsInput) { this.needsInput = needsInput; }
+    public String getProvidedFacts() { return providedFacts; }
+    public void setProvidedFacts(String providedFacts) { this.providedFacts = providedFacts; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

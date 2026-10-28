@@ -166,4 +166,45 @@ class SettingsServiceTest {
         assertTrue(svc.get().providers.isEmpty());
         assertNull(svc.primaryProvider());
     }
+
+    @Test
+    @DisplayName("落盘目录:不填就用程序目录下的 exports/,填了绝对路径就原样用")
+    void exportRootResolution() {
+        SettingsService svc = fresh();
+        Path def = svc.exportRoot();
+        assertTrue(def.isAbsolute(), "落盘必须是绝对路径,否则换个工作目录就写丢了");
+        assertEquals("exports", def.getFileName().toString());
+
+        SettingsService.Settings s = new SettingsService.Settings();
+        s.providers = null;
+        s.exportDir = tempDir.resolve("交付").toString();
+        svc.save(s);
+        assertEquals(tempDir.resolve("交付").toAbsolutePath().normalize(), svc.exportRoot());
+
+        SettingsService.Settings cleared = new SettingsService.Settings();
+        cleared.providers = null;
+        cleared.exportDir = "";
+        svc.save(cleared);
+        assertEquals("exports", svc.exportRoot().getFileName().toString(), "清空目录应回到默认值而不是写到盘符根");
+    }
+
+    @Test
+    @DisplayName("自动落盘开关:请求没带这个字段时不能被翻成 false")
+    void autoExportFlagIsNullable() throws Exception {
+        SettingsService svc = fresh();
+        assertTrue(svc.autoExportArtifacts(), "默认应该自动落盘,成果要能直接拿到");
+
+        SettingsService.Settings off = new SettingsService.Settings();
+        off.providers = null;
+        off.autoExportArtifacts = false;
+        svc.save(off);
+        assertFalse(svc.autoExportArtifacts());
+
+        // 前端只改门槛,没带 autoExportArtifacts
+        SettingsService.Settings partial = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue("{\"reviewThreshold\":90}", SettingsService.Settings.class);
+        svc.save(partial);
+        assertFalse(svc.autoExportArtifacts(), "改别的字段不该把落盘开关偷偷打开或关掉");
+        assertEquals(90, svc.get().reviewThreshold);
+    }
 }

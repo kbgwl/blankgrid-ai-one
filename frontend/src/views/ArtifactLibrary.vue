@@ -102,6 +102,7 @@
             <article class="md-content rd-md" v-html="html"></article>
             <footer class="rd-foot">
               <button class="rd-btn" @click="download(active)">↓ 下载 Markdown</button>
+              <button class="rd-btn" @click="saveToDir(active)">⇥ 存到落盘目录</button>
               <button class="rd-btn quiet" @click="copyLink(active)">复制链接</button>
               <router-link v-if="active.goalId" class="rd-btn quiet" :to="'/goals/' + active.goalId">查看来源项目</router-link>
             </footer>
@@ -287,6 +288,17 @@ async function copyLink(a) {
 
 async function download(a) {
   try { await api.downloadArtifact(a.id, a.title) } catch (e) { ElMessage.error('下载失败') }
+}
+
+/* 落盘和下载是两件事:下载是把文件交给你,落盘是让它待在你能找到的目录里 */
+async function saveToDir(a) {
+  try {
+    const r = await api.exportArtifactToDir(a.id)
+    if (r.ok) ElMessage({ message: '已写入 ' + r.file, type: 'success', plain: true, duration: 4600 })
+    else ElMessage.error(r.error || '写入失败')
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '写入失败')
+  }
 }
 
 async function loadDepartments() {

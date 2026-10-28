@@ -20,6 +20,8 @@ public class Deliverable {
     public static final String REWORK = "REWORK";
     public static final String DONE = "DONE";
     public static final String BLOCKED = "BLOCKED";
+    /** 上游受阻,本项不带着空上下文硬干,等上游解决后自动唤醒 */
+    public static final String WAITING = "WAITING";
     public static final String CANCELLED = "CANCELLED";
 
     @Id

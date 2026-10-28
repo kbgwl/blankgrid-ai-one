@@ -11,7 +11,9 @@ import com.blankgrid.aione.ws.EventPusher;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +59,34 @@ public class TaskService {
         this.tokenRepo = tokenRepo;
         this.activityRepo = activityRepo;
         this.publisher = publisher;
+    }
+
+    /**
+     * 进程重启时,上一轮还在跑的任务其实已经随 JVM 死了,但库里仍写着 RUNNING。
+     * 不收拾的话:交付物永远卡在 RUNNING,引擎的补收逻辑也不敢动它,整个目标就此僵住。
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverInterruptedTasks() {
+        List<Task> running = taskRepo.findByStatus(Task.RUNNING);
+        if (running.isEmpty()) return;
+        for (Task t : running) {
+            t.setStatus(Task.FAILED);
+            t.setError("服务重启,执行被中断;已自动重新排队");
+            t.setFinishedAt(Instant.now());
+            taskRepo.save(t);
+            logRepo.save(new TaskLog(t, "warn", t.getError()));
+            if (t.getEmployee() != null) {
+                Employee e = t.getEmployee();
+                if (Employee.STATUS_RUNNING.equals(e.getStatus())) {
+                    e.setStatus(Employee.STATUS_IDLE);
+                    e.setCurrentTaskSummary("");
+                    empRepo.save(e);
+                }
+            }
+            // 交给目标引擎按失败处理:重试或标记受阻,而不是让它无声地停在这里
+            publisher.publishEvent(new TaskFinishedEvent(t.getId(), false, t.getError()));
+        }
+        log.warn("启动恢复:{} 个中断任务已标记失败并重新排队", running.size());
     }
 
     public Task submit(Long employeeId, String instruction, List<Long> contextTaskIds) {

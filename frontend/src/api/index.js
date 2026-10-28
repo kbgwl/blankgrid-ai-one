@@ -48,6 +48,7 @@ export const api = {
   stats: () => http.get('/stats').then(r => r.data),
   settings: () => http.get('/settings').then(r => r.data),
   saveSettings: (s) => http.put('/settings', s).then(r => r.data),
+  exportStatus: () => http.get('/settings/export').then(r => r.data),
   // 自检是真发一次模型请求,给它 25 秒上限:后端没起来时要失败而不是把按钮挂死
   settingsTest: (body) => http.post('/settings/test', body || {}, { timeout: 25000 }).then(r => r.data),
 
@@ -68,9 +69,14 @@ export const api = {
   replanGoal: (id) => http.post(`/goals/${id}/replan`).then(r => r.data),
   retryWorkstream: (goalId, wsId) => http.post(`/goals/${goalId}/workstreams/${wsId}/retry`).then(r => r.data),
   retryDeliverable: (goalId, dId) => http.post(`/goals/${goalId}/deliverables/${dId}/retry`).then(r => r.data),
+  provideInputs: (goalId, facts) => http.post(`/goals/${goalId}/inputs`, { facts }).then(r => r.data),
 
   artifacts: (params) => http.get('/artifacts', { params, timeout: LIST_TIMEOUT }).then(r => r.data),
   artifact: (id) => http.get(`/artifacts/${id}`, { timeout: LIST_TIMEOUT }).then(r => r.data),
+
+  // 落盘:写进设置页指定的目录,返回真实路径而不是让浏览器再下载一份
+  exportGoalToDir: (id) => http.post(`/goals/${id}/export-to-dir`, {}, { timeout: 30000 }).then(r => r.data),
+  exportArtifactToDir: (id) => http.post(`/artifacts/${id}/export-to-dir`, {}, { timeout: 20000 }).then(r => r.data),
 
   downloadGoal: async (id, title) => {
     const r = await http.get(`/goals/${id}/export`, { responseType: 'blob' })

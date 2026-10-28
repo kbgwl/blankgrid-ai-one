@@ -255,8 +255,53 @@ public class GoalService {
         return d;
     }
 
-    /** 重试受阻工作流:重置其受阻交付物并让引擎继续推进。 */
+    /**
+     * 创始人补料:写入已确认的事实,清空待补清单,并把因缺料/上游受阻的交付物重新推回队列。
+     * 这是「缺料上报」闭环的回收端 —— 没有它,上报只是一张纸条。
+     */
     @Transactional
+    public Map<String, Object> provideFacts(Long goalId, String facts) {
+        Goal g = goalRepo.findById(goalId).orElseThrow(() -> new IllegalArgumentException("目标不存在"));
+        String text = facts == null ? "" : facts.trim();
+        if (text.isBlank()) throw new IllegalArgumentException("补料内容不能为空");
+
+        String prev = g.getProvidedFacts() == null ? "" : g.getProvidedFacts().trim();
+        g.setProvidedFacts(clip(prev.isBlank() ? text : prev + "\n\n" + text, 11000));
+        g.setNeedsInput("");
+        if (Goal.REVIEW.equals(g.getStatus()) || Goal.PAUSED.equals(g.getStatus())
+                || Goal.FAILED.equals(g.getStatus())) {
+            g.setStatus(wsRepo.countByGoalId(goalId) > 0 ? Goal.ACTIVE : Goal.PLANNING);
+            if (g.getProgress() >= 100) g.setProgress(99);
+        }
+        g.setUpdatedAt(Instant.now());
+        goalRepo.save(g);
+
+        int reset = 0;
+        for (Deliverable d : delRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId)) {
+            if (Deliverable.BLOCKED.equals(d.getStatus()) || Deliverable.WAITING.equals(d.getStatus())) {
+                d.setStatus(Deliverable.READY);
+                d.setAttempts(0);
+                d.setReviewAttempts(0);
+                d.setCurrentTaskId(null);
+                d.setUpdatedAt(Instant.now());
+                delRepo.save(d);
+                reset++;
+            }
+        }
+        Activity a = new Activity(Activity.REPORT, "创始人补充了事实依据"
+                + (reset > 0 ? ",已把 " + reset + " 项受阻交付重新推回队列。" : ",后续拆解与执行以这些事实为准。"), null);
+        a.setGoalId(goalId);
+        activityRepo.save(a);
+        push(g);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("reset", reset);
+        out.put("status", g.getStatus());
+        return out;
+    }
+
+    /** 重试受阻工作流:重置其受阻交付物并让引擎继续推进。 */    @Transactional
     public Map<String, Object> retryWorkstream(Long goalId, Long wsId) {
         Workstream ws = wsRepo.findById(wsId).orElseThrow(() -> new IllegalArgumentException("工作流不存在"));
         if (ws.getGoal() == null || !goalId.equals(ws.getGoal().getId())) {
@@ -306,29 +351,45 @@ public class GoalService {
     /** 导出整个项目:目标说明、计划、全部通过评审的成果、机器可读清单。 */
     @Transactional(readOnly = true)
     public byte[] exportZip(Long goalId) {
+        Map<String, String> files = goalFiles(goalId);
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bos, StandardCharsets.UTF_8)) {
+            for (Map.Entry<String, String> e : files.entrySet()) put(zip, e.getKey(), e.getValue());
+        } catch (Exception e) {
+            throw new RuntimeException("导出失败: " + e.getMessage(), e);
+        }
+        return bos.toByteArray();
+    }
+
+    /**
+     * 一个项目的全部交付文件(文件名 → 内容),zip 导出与目录落盘共用同一份内容,
+     * 保证「导出的压缩包」和「写进磁盘的目录」完全一致。
+     */
+    @Transactional(readOnly = true)
+    public Map<String, String> goalFiles(Long goalId) {
         Goal g = goalRepo.findById(goalId).orElseThrow(() -> new IllegalArgumentException("目标不存在"));
         List<Workstream> wss = wsRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId);
         List<Artifact> arts = artRepo.findByGoalIdAndStatusOrderByScoreDesc(goalId, Artifact.APPROVED);
         if (arts.isEmpty()) arts = artRepo.findByGoalIdOrderByCreatedAtDesc(goalId);
 
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        try (ZipOutputStream zip = new ZipOutputStream(bos, StandardCharsets.UTF_8)) {
-            put(zip, "README.md", projectReadme(g, wss, arts));
-            put(zip, "plan.md", projectPlan(g, wss));
-            Map<String, Object> manifest = new LinkedHashMap<>();
-            manifest.put("goal", g);
-            manifest.put("workstreams", wss);
-            manifest.put("artifacts", arts);
-            put(zip, "manifest.json", mapper.writerWithDefaultPrettyPrinter().writeValueAsString(manifest));
-            int i = 1;
-            for (Artifact a : arts) {
-                String name = String.format("artifacts/%02d-%s-v%d.md", i++, safeName(a.getTitle()), a.getVersion());
-                put(zip, name, a.getContent() == null ? "" : a.getContent());
-            }
+        Map<String, String> files = new LinkedHashMap<>();
+        files.put("README.md", projectReadme(g, wss, arts));
+        files.put("plan.md", projectPlan(g, wss));
+        Map<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("goal", g);
+        manifest.put("workstreams", wss);
+        manifest.put("artifacts", arts);
+        try {
+            files.put("manifest.json", mapper.writerWithDefaultPrettyPrinter().writeValueAsString(manifest));
         } catch (Exception e) {
-            throw new RuntimeException("导出失败: " + e.getMessage(), e);
+            files.put("manifest.json", "{}");
         }
-        return bos.toByteArray();
+        int i = 1;
+        for (Artifact a : arts) {
+            files.put(String.format("artifacts/%02d-%s-v%d.md", i++, safeName(a.getTitle()), a.getVersion()),
+                    a.getContent() == null ? "" : a.getContent());
+        }
+        return files;
     }
 
     private String projectReadme(Goal g, List<Workstream> wss, List<Artifact> arts) {

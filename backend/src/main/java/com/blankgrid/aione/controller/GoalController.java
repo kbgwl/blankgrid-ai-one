@@ -2,12 +2,14 @@ package com.blankgrid.aione.controller;
 
 import com.blankgrid.aione.entity.Goal;
 import com.blankgrid.aione.service.CompanyEngineService;
+import com.blankgrid.aione.service.ExportService;
 import com.blankgrid.aione.service.GoalService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -19,10 +21,12 @@ public class GoalController {
 
     private final GoalService goals;
     private final CompanyEngineService engine;
+    private final ExportService exports;
 
-    public GoalController(GoalService goals, CompanyEngineService engine) {
+    public GoalController(GoalService goals, CompanyEngineService engine, ExportService exports) {
         this.goals = goals;
         this.engine = engine;
+        this.exports = exports;
     }
 
     @GetMapping
@@ -83,6 +87,26 @@ public class GoalController {
     @PostMapping("/{id}/refresh")
     public Map<String, Object> refresh(@PathVariable Long id) {
         return goals.refreshProgress(id);
+    }
+
+    public static class InputBody {
+        public String facts;
+    }
+
+    /** 创始人补料:把已核实的事实写进去,受阻的交付物会重新排队。 */
+    @PostMapping("/{id}/inputs")
+    public Map<String, Object> inputs(@PathVariable Long id, @RequestBody InputBody body) {
+        return goals.provideFacts(id, body.facts);
+    }
+
+    /** 把整个项目写成磁盘上的文件(目录由设置页决定),返回落地路径。 */
+    @PostMapping("/{id}/export-to-dir")
+    public Map<String, Object> exportToDir(@PathVariable Long id) {
+        try {
+            return exports.exportGoal(id);
+        } catch (IOException e) {
+            return Map.of("ok", false, "error", "写盘失败:" + e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/replan")
