@@ -51,6 +51,12 @@
         <span class="clock">{{ clock }}</span>
       </div>
     </header>
+    <div v-if="llmBlocked" class="llm-alert">
+      <span class="alert-dot"></span>
+      <b>大模型账户额度不足,生产线已暂停</b>
+      <span class="alert-msg">{{ llmMessage }}</span>
+      <router-link to="/settings" class="alert-go">去设置检查 →</router-link>
+    </div>
     <main class="main">
       <router-view v-slot="{ Component }">
         <transition name="rv" mode="out-in">
@@ -85,6 +91,9 @@ const authError = ref('')
 const authLoading = ref(false)
 const running = ref(0)
 const activeEmployees = ref(0)
+// 账户欠费时后端会停掉调度,这里把原因顶在页面最上面 —— 否则看起来像"系统不动了"
+const llmBlocked = ref(false)
+const llmMessage = ref('')
 const clock = ref('')
 const theme = ref(document.documentElement.dataset.theme === 'paper' ? 'paper' : 'ink')
 const rpBusy = ref(false)
@@ -112,12 +121,15 @@ let offAuth = null
 let offStatus = null
 let clockTimer = null
 let statsTimer = null
+let statsPoll = null
 
 async function loadTopStats() {
   try {
     const s = await api.stats()
     running.value = s.running || 0
     activeEmployees.value = s.activeEmployees || s.totalEmployees || 0
+    llmBlocked.value = !!s.llmBlocked
+    llmMessage.value = s.llmMessage || ''
   } catch (e) { /* 口令未过时静默,登录框会负责提醒 */ }
 }
 function tickClock() {
@@ -141,6 +153,8 @@ onMounted(async () => {
   tickClock()
   clockTimer = setInterval(tickClock, 1000)
   loadTopStats()
+  // 生产线停住时不会再有事件推过来,得自己轮询,不然横幅永远转不过状态
+  statsPoll = setInterval(loadTopStats, 15000)
   // 探测是否需要登录
   try { await api.opsFeed() } catch (e) { /* 401 由拦截器弹窗 */ }
 })
@@ -148,6 +162,7 @@ onBeforeUnmount(() => {
   offAuth && offAuth()
   offStatus && offStatus()
   clearInterval(clockTimer)
+  clearInterval(statsPoll)
   clearTimeout(statsTimer)
 })
 
@@ -293,6 +308,19 @@ async function doLogin() {
 .live-dot.is-run { background: var(--warm); box-shadow: 0 0 9px rgba(var(--rgb-warm), .5); animation: pulseDot 2.2s var(--ease-quiet) infinite; }
 @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .32; } }
 .main { flex: 1; padding: 22px 26px 34px; position: relative; z-index: 1; }
+/* 账户欠费横幅:不是装饰,是把"为什么不动了"顶到最显眼处 */
+.llm-alert {
+  margin: 10px 26px 0; padding: 9px 16px; display: flex; align-items: center; gap: 10px;
+  border: 1px solid rgba(var(--rgb-warn, 210, 150, 60), .38);
+  border-radius: 3px; background: rgba(var(--rgb-warn, 210, 150, 60), .07);
+  font-size: 12px; letter-spacing: .04em; color: var(--text-dim);
+  position: relative; z-index: 2;
+}
+.llm-alert b { font-weight: 400; color: var(--st-error); letter-spacing: .06em; }
+.llm-alert .alert-msg { flex: 1; font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.llm-alert .alert-go { color: var(--glow-cyan-dim); text-decoration: none; flex: none; }
+.llm-alert .alert-go:hover { color: var(--glow-cyan); }
+.alert-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--st-error); box-shadow: 0 0 8px var(--st-error); animation: pulseDot 2.2s var(--ease-quiet) infinite; flex: none; }
 .auth-hint { color: var(--st-error); font-size: 12px; margin: 10px 0 0; }
 @media (max-width: 1100px) {
   .brand-en { display: none; }

@@ -128,6 +128,12 @@ public class GoalController {
         return Map.of("ok", true);
     }
 
+    /** 一键把受阻/挂起的交付物全部推回队列(充值、换模型、重启之后用)。 */
+    @PostMapping("/{id}/retry-blocked")
+    public Map<String, Object> retryBlocked(@PathVariable Long id) {
+        return goals.retryBlocked(id);
+    }
+
     @PostMapping("/{id}/workstreams/{wsId}/retry")
     public Map<String, Object> retryWorkstream(@PathVariable Long id, @PathVariable Long wsId) {
         return goals.retryWorkstream(id, wsId);

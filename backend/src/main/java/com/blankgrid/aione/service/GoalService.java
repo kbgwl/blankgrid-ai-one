@@ -338,6 +338,32 @@ public class GoalService {
     }
 
     /**
+     * 一键恢复:把该目标所有受阻/挂起的交付物重新推回队列。
+     * 用在"充值了 / 换了模型 / 重启过"这类外部原因停摆之后 ——
+     * 否则创始人得逐条点重试,几十条就是几十次点击。
+     */
+    @Transactional
+    public Map<String, Object> retryBlocked(Long goalId) {
+        int reset = 0;
+        for (Deliverable d : delRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId)) {
+            if (Deliverable.BLOCKED.equals(d.getStatus()) || Deliverable.WAITING.equals(d.getStatus())) {
+                d.setStatus(Deliverable.READY);
+                d.setAttempts(0);
+                d.setReviewAttempts(0);
+                d.setCurrentTaskId(null);
+                d.setUpdatedAt(Instant.now());
+                delRepo.save(d);
+                reset++;
+            }
+        }
+        if (reset > 0) resumeGoalFor(goalId, "已把 " + reset + " 项受阻交付重新推回执行队列。");
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("reset", reset);
+        return out;
+    }
+
+    /**
      * 创始人补料:写入已确认的事实,清空待补清单,并把因缺料/上游受阻的交付物重新推回队列。
      * 这是「缺料上报」闭环的回收端 —— 没有它,上报只是一张纸条。
      */

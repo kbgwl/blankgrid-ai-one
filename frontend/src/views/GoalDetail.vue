@@ -38,6 +38,9 @@
           <el-button v-if="canResume" size="small" type="primary" plain :loading="acting" @click="doAction('resume')">恢复</el-button>
           <el-button v-if="canAccept" size="small" class="accept-btn" :loading="acting" @click="accept">复核归档</el-button>
           <el-button v-if="canReplan" size="small" plain :loading="acting" @click="doAction('replan')">重新拆解</el-button>
+          <el-button v-if="stuckCount > 0" size="small" plain :loading="acting" @click="retryAllBlocked">
+            重试受阻 {{ stuckCount }}
+          </el-button>
           <el-dropdown trigger="click" @command="exportAs">
             <el-button size="small" text class="export-btn">导出 <i class="caret">▾</i></el-button>
             <template #dropdown>
@@ -386,6 +389,11 @@ const canPause = computed(() => ['ACTIVE', 'PLANNING', 'REVIEW'].includes(goal.v
 const canResume = computed(() => ['PAUSED', 'FAILED'].includes(goal.value.status))
 const canAccept = computed(() => goal.value.status === 'REVIEW' || (allDone.value && goal.value.status !== 'DONE'))
 const canReplan = computed(() => ['FAILED', 'REVIEW'].includes(goal.value.status))
+// 受阻 + 等上游的条数:账户欠费、换模型、重启之后,一键全部推回队列
+const stuckCount = computed(() => {
+  const rows = (data.value.workstreamList || []).flatMap(w => w.deliverables || [])
+  return rows.filter(d => d.status === 'BLOCKED' || d.status === 'WAITING').length
+})
 
 const statusMap = {
   PLANNING: 'CEO 拆解中', ACTIVE: '推进中', REVIEW: '待创始人复核',
@@ -599,8 +607,16 @@ async function retryDeliverable(d) {
   } catch (e) { ElMessage.error(e.response?.data?.error || '重试失败') } finally { acting.value = false }
 }
 
-async function retryWorkstream(ws) {
+async function retryAllBlocked() {
   acting.value = true
+  try {
+    const r = await api.retryBlocked(goal.value.id)
+    ElMessage({ message: r.reset > 0 ? `已把 ${r.reset} 项重新推回队列` : '没有需要重试的项', type: 'success', plain: true })
+    await load()
+  } catch (e) { ElMessage.error(e.response?.data?.error || '重试失败') } finally { acting.value = false }
+}
+
+async function retryWorkstream(ws) {  acting.value = true
   try {
     await api.retryWorkstream(goal.value.id, ws.id)
     ElMessage({ message: '工作流已重置', type: 'success', plain: true })

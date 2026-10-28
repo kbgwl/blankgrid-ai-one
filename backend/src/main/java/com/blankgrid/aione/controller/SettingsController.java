@@ -16,12 +16,15 @@ public class SettingsController {
     private final SettingsService settingsService;
     private final LlmService llmService;
     private final ExportService exportService;
+    private final com.blankgrid.aione.service.CompanyEngineService engine;
 
     public SettingsController(SettingsService settingsService, LlmService llmService,
-                              ExportService exportService) {
+                              ExportService exportService,
+                              com.blankgrid.aione.service.CompanyEngineService engine) {
         this.settingsService = settingsService;
         this.llmService = llmService;
         this.exportService = exportService;
+        this.engine = engine;
     }
 
     @GetMapping
@@ -69,6 +72,9 @@ public class SettingsController {
         if (!byName && (model == null || model.isBlank())) {
             model = "decision".equals(scope) ? settingsService.decisionModel(null) : null;
         }
-        return llmService.test(p, model);
+        Map<String, Object> r = llmService.test(p, model);
+        // 充完值点一次测试连通,生产线立刻恢复,不用等冷却也不用重启
+        if (Boolean.TRUE.equals(r.get("ok"))) engine.clearLlmBlock();
+        return r;
     }
 }

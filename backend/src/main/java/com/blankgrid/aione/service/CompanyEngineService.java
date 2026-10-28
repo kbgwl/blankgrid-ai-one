@@ -63,6 +63,62 @@ public class CompanyEngineService {
 
     private final Set<Long> planningGoals = ConcurrentHashMap.newKeySet();
     private final Set<Long> planningWorkstreams = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 大模型账户不可用(余额不足 / 配额用尽)时的闸门。
+     * 继续调度只会把每个交付物挨个烧成 FAILED,页面上看着像"全线崩了",
+     * 其实只有一个原因:该充值了。停 10 分钟,期间不再发新活,也不再刷失败记录。
+     */
+    private static final long LLM_BLOCK_COOLDOWN_MS = 10 * 60 * 1000L;
+    private volatile long llmBlockedUntil = 0;
+    private volatile String llmBlockedReason = "";
+
+    public boolean llmBlocked() {
+        return System.currentTimeMillis() < llmBlockedUntil;
+    }
+
+    public String llmBlockedReason() {
+        return llmBlocked() ? llmBlockedReason : "";
+    }
+
+    /** 设置页测试连通成功后调一次:充值完不必等冷却,也不用重启。 */
+    public void clearLlmBlock() {
+        llmBlockedUntil = 0;
+        llmBlockedReason = "";
+    }
+
+    /** 从错误信息里认出"不是活干错了,是账户里没钱了",并据此拉起闸门。 */
+    private void noteLlmFailure(String msg) {
+        if (msg == null || msg.isBlank()) return;
+        String m = msg.toLowerCase(Locale.ROOT);
+        boolean blocked = m.contains("insufficient balance") || m.contains("402")
+                || m.contains("余额") || m.contains("quota") || m.contains("payment required");
+        if (!blocked) return;
+        boolean first = !llmBlocked();
+        llmBlockedReason = clip(msg, 200);
+        llmBlockedUntil = System.currentTimeMillis() + LLM_BLOCK_COOLDOWN_MS;
+        if (first) {
+            log.warn("大模型账户不可用,暂停调度:{}", llmBlockedReason);
+            activity(Activity.ESCALATION, "大模型账户余额不足,生产线已暂停调度 —— 重试不会成功,也没必要把每个"
+                    + "交付物都刷成失败。充值后在「设置 → 模型服务」点一次测试连通,10 分钟内自动恢复。", null);
+            pusher.push("llm-blocked", Map.of("reason", llmBlockedReason));
+        }
+    }
+
+    /**
+     * 服务商侧的失败,不是"活干砸了":余额不足、限流、网关超时、空响应。
+     * 拿它去扣重试次数,一次欠费就能把整条线永久钉死在 BLOCKED,
+     * 之后即使充了值,也得人工一条条点重试才能动 —— 所以这类失败只排队,不判死。
+     */
+    static boolean providerError(String err) {
+        if (err == null || err.isBlank()) return false;
+        String e = err.toLowerCase(java.util.Locale.ROOT);
+        return e.contains("api 返回") || e.contains("api 错误") || e.contains("402") || e.contains("429")
+                || e.contains("insufficient") || e.contains("quota")
+                || e.contains("模型未返回内容") || e.contains("连接大模型") || e.contains("请求被中断")
+                || e.contains("timeout") || e.contains("timed out") || e.contains("connection");
+    }
+
     /** 跨部门拆活查重的临界区:两个部门可能同时落库,读清单与写入必须在同一把锁里 */
     private final Object planLock = new Object();
     private final ExecutorService planner = Executors.newFixedThreadPool(2, r -> {
@@ -115,12 +171,53 @@ public class CompanyEngineService {
         }
     }
 
+    /**
+     * 进程重启后,上一次运行里"正在执行"的任务其实已经没人管了:它们不会自己变 DONE,
+     * 交付物就会永远停在 RUNNING 还占着并发名额,整条线看起来"卡住了"却没有报错。
+     * 所以启动时先把这些孤儿任务标成中断,把对应交付物放回队列 ——
+     * 不消耗重试次数(不是它的错),评审阶段缺失的由 recoverReviewStages 补建。
+     */
+    @EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void recoverAfterRestart() {
+        try {
+            List<Task> orphans = taskRepo.findByStatus(Task.RUNNING);
+            for (Task t : orphans) {
+                t.setStatus(Task.FAILED);
+                t.setError("进程重启,本次执行中断,已自动重新排队");
+                t.setFinishedAt(Instant.now());
+                taskRepo.save(t);
+                if (t.getDeliverableId() == null) continue;
+                Deliverable d = delRepo.findById(t.getDeliverableId()).orElse(null);
+                if (d == null || d.getCurrentTaskId() == null || !d.getCurrentTaskId().equals(t.getId())) continue;
+                d.setCurrentTaskId(null);
+                if (Deliverable.RUNNING.equals(d.getStatus())) d.setStatus(Deliverable.READY);
+                d.setUpdatedAt(Instant.now());
+                delRepo.save(d);
+            }
+            int idle = 0;
+            for (Employee e : empRepo.findAll()) {
+                if (Employee.STATUS_RUNNING.equals(e.getStatus())) {
+                    e.setStatus(Employee.STATUS_IDLE);
+                    e.setCurrentTaskSummary("");
+                    empRepo.save(e);
+                    idle++;
+                }
+            }
+            if (!orphans.isEmpty() || idle > 0) {
+                log.warn("启动清理:{} 个中断任务重新排队,{} 个岗位恢复在岗", orphans.size(), idle);
+            }
+        } catch (Exception e) {
+            log.warn("启动清理失败: {}", e.getMessage());
+        }
+    }
+
     // ==================== 定时推进 ====================
 
     /** 每 10 秒推进一次:补拆解、按依赖启动交付、检查目标完成。 */
     @Scheduled(fixedDelay = 10000)
     public void tick() {
         if (!settings.hasProvider() || !budgetAvailable()) return;
+        if (llmBlocked()) return;   // 账户欠费时停手,别把失败记录刷满
         try {
             orgService.ensureHierarchy();
             for (Goal g : goalRepo.findAllByOrderByCreatedAtDesc()) {
@@ -170,7 +267,7 @@ public class CompanyEngineService {
                 checkGoalCompletion(g);
             }
         } catch (Exception e) {
-            log.warn("目标引擎 tick 异常: {}", e.getMessage());
+            log.warn("目标引擎 tick 异常: {}", e.getMessage(), e);
         }
     }
 
@@ -920,9 +1017,18 @@ public class CompanyEngineService {
     }
 
     private void handleWorkFailure(Task task, Deliverable d, String error) {
+        noteLlmFailure(error);
         d.setCurrentTaskId(null);
         d.setReviewNotes(clip("上次执行失败:" + nz(error), 2000));
         d.setUpdatedAt(Instant.now());
+        if (providerError(error)) {
+            d.setAttempts(Math.max(0, d.getAttempts() - 1));   // 不是它的错,不扣次数
+            d.setStatus(Deliverable.READY);
+            delRepo.save(d);
+            log.warn("交付物 {} 因模型服务侧原因中断,保持待执行: {}", d.getId(), clip(nz(error), 120));
+            pushGoal(d.getGoalId());
+            return;
+        }
         int maxAttempts = Math.max(1, settings.get().maxReviewRounds) + 1;
         if (d.getAttempts() < maxAttempts) {
             d.setStatus(Deliverable.READY);
@@ -938,7 +1044,16 @@ public class CompanyEngineService {
     }
 
     private void handleReviewFailure(Task task, Deliverable d, String error) {
+        noteLlmFailure(error);
         d.setCurrentTaskId(null);
+        if (providerError(error)) {
+            // 评审没跑成,不是成果不行:留在 REVIEW,等账户恢复后由 recoverReviewStages 补建评审任务
+            d.setReviewNotes(clip("评审中断(模型服务侧):" + nz(error), 2000));
+            d.setUpdatedAt(Instant.now());
+            delRepo.save(d);
+            log.warn("交付物 {} 评审因模型服务侧原因中断,稍后重试: {}", d.getId(), clip(nz(error), 120));
+            return;
+        }
         if (d.getReviewAttempts() < 2) {
             Artifact art = d.getLastArtifactId() == null ? null : artRepo.findById(d.getLastArtifactId()).orElse(null);
             if (art != null) {
@@ -994,6 +1109,7 @@ public class CompanyEngineService {
         Goal g = goalRepo.findById(goalId).orElse(null);
         if (g == null) return;
         if (Goal.DONE.equals(g.getStatus()) || Goal.PAUSED.equals(g.getStatus())) return;
+        noteLlmFailure(message);
         String msg = nz(message);
         g.setStatus(Goal.FAILED);
         g.setCeoSummary("拆解失败:" + clip(msg, 180));

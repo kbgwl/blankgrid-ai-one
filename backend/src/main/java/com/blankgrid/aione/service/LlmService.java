@@ -105,6 +105,9 @@ public class LlmService {
 
         lastFinishReason.set("");
         StringBuilder full = new StringBuilder();
+        // 有的服务商流式请求先用 200 开个头,再把错误塞进 data 里(余额不足、限流、模型下线)。
+        // 不认这个的话,表现就是"模型未返回内容",查起来完全找不着方向。
+        final String[] upstreamError = new String[1];
         try {
             HttpResponse<java.util.stream.Stream<String>> resp =
                     http.send(req, HttpResponse.BodyHandlers.ofLines());
@@ -129,6 +132,11 @@ public class LlmService {
                 if (data.isEmpty() || "[DONE]".equals(data)) return;
                 try {
                     JsonNode root = mapper.readTree(data);
+                    JsonNode errNode = root.path("error");
+                    if (!errNode.isMissingNode() && !errNode.isNull()) {
+                        upstreamError[0] = errNode.path("message").asText(errNode.toString());
+                        return;
+                    }
                     JsonNode choice = root.path("choices").path(0);
                     JsonNode finish = choice.path("finish_reason");
                     if (!finish.isMissingNode() && !finish.isNull()) lastFinishReason.set(finish.asText(""));
@@ -149,6 +157,7 @@ public class LlmService {
             throw new IllegalStateException("连接大模型 API 失败: " + e.getMessage(), e);
         }
         if (full.isEmpty()) {
+            if (upstreamError[0] != null) throw new IllegalStateException("API 错误: " + truncate(upstreamError[0], 300));
             throw new IllegalStateException("模型未返回内容");
         }
         return full.toString();

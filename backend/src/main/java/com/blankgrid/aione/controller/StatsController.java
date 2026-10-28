@@ -30,13 +30,15 @@ public class StatsController {
     private final DeliverableRepository delRepo;
     private final ArtifactRepository artRepo;
     private final com.blankgrid.aione.service.CostService costs;
+    private final com.blankgrid.aione.service.CompanyEngineService engine;
 
     public StatsController(TaskRepository taskRepo, EmployeeRepository empRepo,
                            com.blankgrid.aione.repo.TokenLogRepository tokenRepo,
                            com.blankgrid.aione.service.SettingsService settingsService,
                            GoalRepository goalRepo, DeliverableRepository delRepo,
                            ArtifactRepository artRepo,
-                           com.blankgrid.aione.service.CostService costs) {
+                           com.blankgrid.aione.service.CostService costs,
+                           com.blankgrid.aione.service.CompanyEngineService engine) {
         this.taskRepo = taskRepo;
         this.empRepo = empRepo;
         this.tokenRepo = tokenRepo;
@@ -45,6 +47,7 @@ public class StatsController {
         this.delRepo = delRepo;
         this.artRepo = artRepo;
         this.costs = costs;
+        this.engine = engine;
     }
 
     @GetMapping
@@ -56,6 +59,9 @@ public class StatsController {
         m.put("done", taskRepo.countByStatus(Task.DONE));
         m.put("failed", taskRepo.countByStatus(Task.FAILED));
         m.put("doneToday", taskRepo.countByStatusAndCreatedAtAfter(Task.DONE, dayStart));
+        // 账户欠费时前端要能一眼看到原因,而不是盯着"怎么不动了"猜
+        m.put("llmBlocked", engine.llmBlocked());
+        m.put("llmMessage", engine.llmBlockedReason());
         m.put("totalEmployees", empRepo.count());
         long tokensToday = tokenRepo.tokensSince(dayStart);
         m.put("tokensTotal", tokenRepo.totalTokens());
