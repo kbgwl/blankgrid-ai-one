@@ -260,6 +260,9 @@ public class CompanyEngineService {
         sb.append("3. 负责人必须使用上面列出的该部门负责人 id;部门 id 必须准确。\n");
         sb.append("4. 验收标准必须可检查:数量、结构、覆盖范围、可用性、证据要求。禁止“高质量”“尽量完善”这类空话。\n");
         sb.append("5. 如果目标本身缺关键信息,不要停下来提问:在拆解中按合理假设推进,并把假设写进 brief。\n");
+        sb.append("6. 验收标准必须能被机械核对,但不许写无法机械判定的绝对化限定:"
+                + "不要写“全部中文”“不含任何英文”“文字必须完美”这类;"
+                + "确实需要限定语种或形式时,写明例外(如“中文表述,行业通用缩写 AI/API 等与专有名词除外”)。\n");
         sb.append("\n只输出一个 JSON 对象,不要 Markdown 代码块,不要任何解释:\n");
         sb.append("{\"summary\":\"你的拆解思路(一两句话)\",\"workstreams\":[");
         sb.append("{\"departmentId\":1,\"leadId\":12,\"title\":\"工作流标题\",\"brief\":\"要产出的内容与假设\",");
@@ -415,6 +418,8 @@ public class CompanyEngineService {
         sb.append("4. 执行人用上面的岗位 id;不要让所有人都做同一件事,按专长分工。\n");
         sb.append("5. outputType 只能是:文档 / 方案 / 代码 / 清单 / 设计说明 / 报告。\n");
         sb.append("6. 不允许空泛任务(如“优化一下”“完善内容”);每项都要能直接进入评审。\n");
+        sb.append("7. 验收标准要可机械核对,但禁止无法机械判定的绝对化限定:不写“全部中文”“不含英文”“完美”这类;"
+                + "需要限定语种时必须带例外(如“中文表述,AI/API 等行业缩写与专有名词除外”)。\n");
         sb.append("\n只输出一个 JSON 对象,不要 Markdown 代码块,不要解释:\n");
         sb.append("{\"summary\":\"拆活思路\",\"deliverables\":[");
         sb.append("{\"ownerId\":21,\"title\":\"交付物标题\",\"brief\":\"具体要做什么\",");
@@ -639,7 +644,13 @@ public class CompanyEngineService {
         ins.append("2. 空话、正确但无法执行、缺少数据/证据、结构残缺、偏离目标,均不通过。\n");
         ins.append("3. 满分 100,达到 ").append(threshold).append(" 分才通过。\n");
         ins.append("4. 必须指出必须修改的具体问题,不要只说“可以更好”。\n");
-        ins.append("5. 只输出 JSON,不要 Markdown 代码块:\n");
+        ins.append("5. 判定口径:按业务意图判,不按字面抠字眼。下列情形不算违规,不得据此扣分或不通过:\n");
+        ins.append("   · 行业通用缩写与专有名词:AI、API、SaaS、CRM、PRD、URL、KPI 等;\n");
+        ins.append("   · 品牌名、产品名、技术栈与系统名称;\n");
+        ins.append("   · 行业内已通用的写法,如“转人工”“次日回复”“单据录入”。\n");
+        ins.append("   若验收标准与上述冲突(例如要求“全部中文”),以“目标读者能看懂、交付物可直接使用”为最高准绳;\n");
+        ins.append("   冲突本身写进 notes 提醒改口径,但不作为不通过的理由;只有真正影响可用性的问题才判不通过。\n");
+        ins.append("6. 只输出 JSON,不要 Markdown 代码块:\n");
         ins.append("{\"score\":0,\"pass\":false,\"summary\":\"一句话结论\",\"notes\":\"必须修改项,逐条\",\"strengths\":[\"优点\"]}");
 
         try {

@@ -199,7 +199,7 @@ import { api } from '../api'
 const defaults = {
   providers: [], knowledgeBase: '', concurrency: 4, dailyTokenBudget: 0,
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
-  reviewThreshold: 85, maxReviewRounds: 2, autoStartGoals: true,
+  reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
   decisionProvider: '', decisionModel: ''
 }
 

@@ -35,7 +35,8 @@ public class SettingsService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Settings {
-        public List<Provider> providers = new ArrayList<>();
+        /** null = 请求没带这个字段(保留原值);空数组 = 明确清空。由 get() 统一补成非 null。 */
+        public List<Provider> providers;
         public String knowledgeBase = "";
         public int concurrency = 4;
         /** 每日 token 预算,0 = 不限;到顶自动暂停 CEO 自动巡视 */
@@ -49,7 +50,7 @@ public class SettingsService {
         /** 评审通过分(0-100) */
         public int reviewThreshold = 85;
         /** 单个交付物最多返工轮次 */
-        public int maxReviewRounds = 2;
+        public int maxReviewRounds = 3;
         /** 目标创建后自动拆解 */
         public boolean autoStartGoals = true;
         /** CEO 决策(巡视拍板 + 目标拆解)专用服务商名;null=未提供,空串=跟随主用 */
@@ -75,6 +76,8 @@ public class SettingsService {
     public synchronized Settings get() {
         if (cache == null) {
             cache = load();
+            // 落盘文件里可能没有 providers,统一补成空列表,后续取值不必到处判 null
+            if (cache.providers == null) cache.providers = new ArrayList<>();
         }
         return cache;
     }

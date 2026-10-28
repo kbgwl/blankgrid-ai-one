@@ -34,3 +34,6 @@ desktop.ini
 .idea/
 .vscode/
 *.iml
+
+# 本地会话记忆与 Agent 工作目录
+.workbuddy/

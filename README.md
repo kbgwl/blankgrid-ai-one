@@ -5,6 +5,23 @@
 
 AI 即一家公司:创始人只下达目标,CEO Agent 统观全局并把目标拆成部门工作流,部门负责人拆成交付物,团队执行、评审不过就返工,合格成果自动归档。组织架构即界面,每个岗位是一枚发光的格子,实时看到谁在做什么、产出如何。
 
+## 环境准备(首次一次)
+
+仓库不含 `tools/`(数百 MB,已被 `.gitignore` 排除),本地工具链需自己放好:
+
+```
+tools/
+  jdk-17/                  Temurin JDK 17 (Adoptium)
+  apache-maven-3.9.9/
+  maven-settings.xml       把中央仓库指向阿里云镜像
+  env.bat / env.sh         把上面两者临时注入 PATH,不动系统环境
+```
+
+- JDK:https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/windows/ (取 `OpenJDK17U-jdk_x64_windows_hotspot_*.zip`)
+- Maven:https://mirrors.huaweicloud.com/apache/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip
+
+解压后确认 `tools\jdk-17\bin\java.exe` 与 `tools\apache-maven-3.9.9\bin\mvn.cmd` 都在,脚本会自动接管;目录名不同则改 `env.bat` 里的两处路径。Node 22 需系统已安装(`tools\node` 存在时也会优先用)。
+
 ## 快速启动
 
 **开发模式**(前后端热更新,改代码用):双击 `start.bat`,浏览器自动打开 http://localhost:5180
@@ -18,10 +35,14 @@ AI 即一家公司:创始人只下达目标,CEO Agent 统观全局并把目标�
 手动启动:
 
 ```bat
-:: 后端(8090)
-tools\env.bat && cd backend && mvn spring-boot:run
-:: 前端(5180)
-cd frontend && npm run dev
+:: 后端(8090) —— 先 call 环境脚本,mvn 才会在 PATH 里
+call tools\env.bat
+cd backend
+mvn spring-boot:run
+
+:: 前端(5180),另开一个窗口
+cd frontend
+npm run dev
 ```
 
 ## 第一次使用
@@ -47,7 +68,7 @@ cd frontend && npm run dev
 
 - 后端:Spring Boot 3 + JPA + H2(本地文件库 `backend/data/`)+ WebSocket(STOMP)
 - 前端:Vue 3 + Vite + Element Plus + SVG 自绘架构图
-- 工具链:JDK 17 / Maven / Node 22 均在 `tools/` 目录,不污染系统
+- 工具链:JDK 17 与 Maven 3.9.9 随项目放在 `tools/`,由 `env.bat` 临时注入 PATH,不污染系统;Node 22 用系统安装
 
 ## 上云预留
 
