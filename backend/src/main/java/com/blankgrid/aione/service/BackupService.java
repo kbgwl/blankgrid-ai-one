@@ -69,4 +69,46 @@ public class BackupService {
             log.warn("清理旧备份失败: {}", e.getMessage());
         }
     }
+
+    /** 现有备份列表,新的在前。让「备份」不只是一个看不见的动作。 */
+    public List<Path> list() {
+        if (!Files.isDirectory(backupDir)) return List.of();
+        try (Stream<Path> files = Files.list(backupDir)) {
+            return files
+                    .filter(p -> p.getFileName().toString().startsWith("aione-") && p.getFileName().toString().endsWith(".zip"))
+                    .sorted(Comparator.comparing((Path p) -> p.getFileName().toString()).reversed())
+                    .toList();
+        } catch (IOException e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * 把某份备份取出来,准备在下次启动时替换数据库文件。
+     *
+     * <p>H2 在运行中锁着数据库文件,热替换会直接损坏数据,所以这里只做「暂存 + 打标记」,
+     * 真正的替换发生在下次启动、JPA 打开连接之前(见 {@link RestoreApplier})。
+     * 宁可多一步重启,也不要在运行中动一个正在被写的库。
+     */
+    public String stageRestore(String name) {
+        Path root = backupDir.toAbsolutePath().normalize();
+        Path zip = root.resolve(name).normalize();
+        // 只允许取备份目录里的文件,避免 ../ 读到别处
+        if (!zip.startsWith(root)) throw new IllegalArgumentException("备份文件名不合法");
+        if (!Files.isRegularFile(zip)) throw new IllegalArgumentException("找不到这份备份:" + name);
+        try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(zip.toFile())) {
+            java.util.zip.ZipEntry dbEntry = zf.stream()
+                    .filter(e -> e.getName().endsWith(".mv.db"))
+                    .findFirst().orElseThrow(() -> new IllegalArgumentException("这份备份里没有 H2 数据文件"));
+            Path staging = Path.of(dataDir, "restore-pending");
+            Files.createDirectories(staging);
+            try (var in = zf.getInputStream(dbEntry)) {
+                Files.copy(in, staging.resolve("aione.mv.db"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            Files.writeString(staging.resolve("SOURCE"), name + "\n" + LocalDateTime.now());
+            return name;
+        } catch (IOException e) {
+            throw new IllegalStateException("解出备份失败:" + e.getMessage(), e);
+        }
+    }
 }

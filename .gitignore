@@ -5,9 +5,10 @@ target/
 *.jar
 *.war
 
-# 运行时数据:H2 数据库、备份、模型服务商配置(含 API key)
+# 运行时数据:H2 数据库、备份、模型服务商配置(含 API key)、默认成果落盘目录
 data/
 backend/data/
+exports/
 *.mv.db
 *.lock.db
 *.trace.db

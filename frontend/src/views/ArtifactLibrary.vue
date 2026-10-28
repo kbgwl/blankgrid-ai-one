@@ -99,8 +99,20 @@
               <div class="qa-bar"><i :style="{ '--w': Math.min(100, active.score || 0) + '%' }"></i></div>
               <p>{{ active.reviewNotes || '评审没有留下额外意见。' }}</p>
             </div>
-            <article class="md-content rd-md" v-html="html"></article>
+            <div v-if="editing" class="rd-edit">
+              <el-input v-model="draft" type="textarea" :rows="22" resize="vertical" />
+              <div class="rd-edit-actions">
+                <span class="hint">保存后标记为「人工修订」,评审分只作历史参考。</span>
+                <div class="btns">
+                  <el-button size="small" @click="toggleEdit">取消</el-button>
+                  <el-button type="primary" size="small" :loading="savingEdit" :disabled="!draft.trim()" @click="saveEdit">保存</el-button>
+                </div>
+              </div>
+            </div>
+            <article v-else class="md-content rd-md" v-html="html"></article>
             <footer class="rd-foot">
+              <button class="rd-btn" @click="toggleEdit">{{ editing ? '取消编辑' : '✎ 编辑正文' }}</button>
+              <button v-if="active.status !== 'APPROVED'" class="rd-btn" @click="adoptActive">✓ 定为最终版</button>
               <button class="rd-btn" @click="download(active)">↓ 下载 Markdown</button>
               <button class="rd-btn" @click="saveToDir(active)">⇥ 存到落盘目录</button>
               <button class="rd-btn quiet" @click="copyLink(active)">复制链接</button>
@@ -216,6 +228,45 @@ const goalName = computed(() => {
 const authorName = computed(() => active.value?.author || '—')
 // 面板已给出标题,正文首个 H1 通常是同一句,去掉避免重复
 const html = computed(() => renderMarkdown((active.value?.content || '').replace(/^\s*#\s+[^\n]*(?:\n+|$)/, '')))
+
+/* ===== 人工修订:在这里直接改正文,不必回到项目里 ===== */
+const editing = ref(false)
+const draft = ref('')
+const savingEdit = ref(false)
+
+function toggleEdit() {
+  if (!active.value) return
+  editing.value = !editing.value
+  draft.value = editing.value ? (active.value.content || '') : ''
+}
+
+async function saveEdit() {
+  if (!active.value) return
+  savingEdit.value = true
+  try {
+    const r = await api.editArtifact(active.value.id, { content: draft.value })
+    const i = all.value.findIndex(a => a.id === active.value.id)
+    if (i >= 0) all.value[i] = { ...all.value[i], ...r }
+    editing.value = false
+    ElMessage({ message: '已保存为人工修订版', type: 'success', plain: true })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '保存失败')
+  } finally { savingEdit.value = false }
+}
+
+async function adoptActive() {
+  if (!active.value) return
+  try {
+    const r = await api.adoptArtifact(active.value.id)
+    const i = all.value.findIndex(a => a.id === active.value.id)
+    if (i >= 0) all.value[i] = { ...all.value[i], ...r }
+    ElMessage({ message: '已定为最终版', type: 'success', plain: true })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '操作失败')
+  }
+}
+
+watch(activeId, () => { editing.value = false; draft.value = '' })
 
 function toggle(key, value) {
   pick[key] = pick[key] === value ? '' : value
@@ -516,6 +567,16 @@ onBeforeUnmount(() => { off && off(); clearTimeout(timer); clearTimeout(newTimer
 .rd-md :deep(.md-table) { font-family: var(--font-serif); font-size: 12px; min-width: 0; }
 
 .rd-foot { display: flex; align-items: center; gap: 8px; padding-top: 15px; border-top: 1px solid var(--border-hair); margin-top: 18px; flex-wrap: wrap; }
+/* 人工修订:阅读区切成可写状态 */
+.rd-edit { margin-top: 16px; }
+.rd-edit :deep(.el-textarea__inner) {
+  background: rgba(255,255,255,.02); color: var(--text-main);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9;
+  border-color: var(--border-hair); box-shadow: none;
+}
+.rd-edit-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 10px; }
+.rd-edit-actions .hint { font-size: 11px; color: var(--text-faint); line-height: 1.6; }
+.rd-edit-actions .btns { display: flex; gap: 8px; flex: none; }
 .rd-btn {
   background: var(--chip-bg); border: 1px solid rgba(var(--rgb-glow), .3); color: var(--glow-cyan);
   font-family: var(--font-sans); font-size: 11px; letter-spacing: .1em; padding: 6px 13px; border-radius: 8px;

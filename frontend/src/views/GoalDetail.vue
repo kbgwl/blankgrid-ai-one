@@ -74,6 +74,21 @@
       <pre v-if="factsOpen" class="facts-body">{{ goal.providedFacts }}</pre>
     </section>
 
+    <!-- 预算用尽:不再静默停住,直接给追加入口 -->
+    <section v-if="budgetExhausted" class="budget glass">
+      <div class="budget-head">
+        <span class="budget-tag">预算用尽</span>
+        <h3>已消耗 {{ fmtTokens(goal.spentTokens) }} / {{ fmtTokens(goal.budgetTokens) }} token,项目停在半路</h3>
+        <p>剩下的交付物还排在队列里,加一笔额度就会接着跑,不用重新拆解。</p>
+      </div>
+      <div class="budget-actions">
+        <el-button v-for="n in [100000, 300000, 500000]" :key="n" size="small" plain
+                   :disabled="addingBudget" @click="addBudget(n)">+{{ fmtTokens(n) }}</el-button>
+        <el-input-number v-model="extraBudget" :min="10000" :step="10000" size="small" :controls="false" />
+        <el-button type="primary" size="small" :loading="addingBudget" @click="addBudget(extraBudget)">追加并继续</el-button>
+      </div>
+    </section>
+
     <!-- 四步生产线:拆解 → 分派 → 交付 → 归档,当前卡住的那一步在亮 -->
     <nav class="pipeline glass" :class="{ 'is-rp': rp.on }" aria-label="施工进度">
       <div v-for="s in stages" :key="s.no" class="pstep" :class="'ps-' + s.state">
@@ -630,6 +645,27 @@ function openArtifact(id) {
   artifactOpen.value = true
 }
 
+/* ===== 预算用尽:以前是静默停住,现在直接给追加入口 ===== */
+const budgetExhausted = computed(() => {
+  const g = goal.value
+  if (!g || !g.budgetTokens) return false
+  return (g.spentTokens || 0) >= g.budgetTokens
+})
+const addingBudget = ref(false)
+const extraBudget = ref(100000)
+async function addBudget(tokens) {
+  const n = Number(tokens) || 0
+  if (n <= 0) return
+  addingBudget.value = true
+  try {
+    await api.addGoalBudget(goal.value.id, n)
+    ElMessage({ message: `已追加 ${fmtTokens(n)} token,项目继续推进`, type: 'success', plain: true })
+    await load()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '追加失败')
+  } finally { addingBudget.value = false }
+}
+
 let off = null
 let timer = null
 onMounted(() => {
@@ -906,6 +942,22 @@ onBeforeUnmount(() => {
   background: linear-gradient(165deg, rgba(var(--rgb-warn), .07), rgba(var(--rgb-surface-2), .66));
   animation: riseIn .5s var(--ease-out) both;
 }
+/* 预算用尽:比缺料更"硬"的信号,用错误色,但同样给出口 */
+.budget {
+  padding: 18px 24px 20px; border-radius: 14px;
+  border: 1px solid rgba(var(--rgb-error), .34);
+  background: linear-gradient(165deg, rgba(var(--rgb-error), .07), rgba(var(--rgb-surface-2), .66));
+  animation: riseIn .5s var(--ease-out) both;
+}
+.budget-head { display: flex; flex-direction: column; gap: 6px; }
+.budget-tag {
+  align-self: flex-start; font-size: 10px; letter-spacing: .22em; color: var(--st-error);
+  border: 1px solid rgba(var(--rgb-error), .3); border-radius: 999px; padding: 3px 10px;
+}
+.budget-head h3 { margin: 4px 0 0; font-size: 15.5px; font-weight: 400; color: var(--text-main); }
+.budget-head p { margin: 0; font-size: 12.5px; line-height: 1.75; color: var(--text-dim); }
+.budget-actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.budget-actions :deep(.el-input-number) { width: 128px; }
 .needs-head { display: flex; flex-direction: column; gap: 6px; }
 .needs-mark {
   align-self: flex-start; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .22em;

@@ -59,6 +59,14 @@ public class Artifact {
 
     private String fileName = "";
 
+    /**
+     * 这份正文是否被创始人手工改过。改过之后评审分不再代表质量,只作历史参考。
+     * 用包装类型而不是 boolean:老库升级时 Hibernate 会执行
+     * {@code alter table artifacts add column manual_edit boolean not null},
+     * 已有行没有默认值,H2 会直接拒绝,整个库升级失败。可空就没这个问题。
+     */
+    private Boolean manualEdit;
+
     private Instant createdAt = Instant.now();
     private Instant approvedAt;
 
@@ -93,6 +101,8 @@ public class Artifact {
     public void setReviewNotes(String reviewNotes) { this.reviewNotes = reviewNotes; }
     public String getFileName() { return fileName; }
     public void setFileName(String fileName) { this.fileName = fileName; }
+    public boolean isManualEdit() { return Boolean.TRUE.equals(manualEdit); }
+    public void setManualEdit(boolean manualEdit) { this.manualEdit = manualEdit; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getApprovedAt() { return approvedAt; }

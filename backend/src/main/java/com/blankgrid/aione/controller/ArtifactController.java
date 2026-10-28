@@ -82,6 +82,27 @@ public class ArtifactController {
         }
     }
 
+    public static class EditBody {
+        public String title;
+        public String content;
+    }
+
+    /** 人工修订正文:模型写的差一口气时,创始人直接改,不用重跑一轮。 */
+    @PutMapping("/{id}")
+    public Map<String, Object> edit(@PathVariable Long id, @RequestBody EditBody body) {
+        Artifact a = goals.editArtifact(id, body.title, body.content);
+        return meta(a);
+    }
+
+    /** 人工定稿:定为最终版,并把对应交付物标为完成,下游等待自动解除。 */
+    @PostMapping("/{id}/adopt")
+    public Map<String, Object> adopt(@PathVariable Long id) {
+        Artifact a = goals.adoptArtifact(id);
+        Map<String, Object> m = meta(a);
+        m.put("ok", true);
+        return m;
+    }
+
     @GetMapping("/{id}/download")
     public ResponseEntity<byte[]> download(@PathVariable Long id) {        Artifact a = goals.artifact(id);
         String title = nz(a.getTitle()).isBlank() ? "artifact" : a.getTitle();
@@ -111,6 +132,7 @@ public class ArtifactController {
         m.put("status", a.getStatus());
         m.put("score", a.getScore());
         m.put("reviewNotes", a.getReviewNotes());
+        m.put("manualEdit", a.isManualEdit());
         m.put("author", a.getAuthor() == null ? null : a.getAuthor().getName());
         m.put("goalId", a.getGoalId());
         m.put("deliverableId", a.getDeliverableId());

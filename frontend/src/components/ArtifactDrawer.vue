@@ -8,6 +8,8 @@
             <span class="art-ver">v{{ art.version }}</span>
             <span class="art-status" :class="'as-' + (art.status || '').toLowerCase()">{{ statusText }}</span>
           </div>
+          <el-button size="small" text class="dl" @click="toggleEdit">{{ editing ? '取消编辑' : '编辑正文' }}</el-button>
+          <el-button v-if="canAdopt" size="small" text class="dl" :loading="adopting" @click="adopt">定为最终版</el-button>
           <el-button size="small" text class="dl" @click="saveToDir">存到落盘目录</el-button>
           <el-button size="small" text class="dl" @click="download">下载 Markdown</el-button>
         </div>
@@ -15,6 +17,7 @@
         <div class="art-meta">
           <span v-if="authorName">作者 · {{ authorName }}<template v-if="art.authorTitle"> · {{ art.authorTitle }}</template></span>
           <span v-if="art.score">评审 {{ art.score }} 分</span>
+          <span v-if="art.manualEdit" class="manual-tag">人工修订</span>
           <span>{{ fmt(art.createdAt) }}</span>
         </div>
       </header>
@@ -24,7 +27,17 @@
         <p>{{ art.reviewNotes }}</p>
       </section>
 
-      <article class="md-content" :key="art.id" v-html="html"></article>
+      <div v-if="editing" class="art-edit">
+        <el-input v-model="draft" type="textarea" :rows="24" resize="vertical" />
+        <div class="art-edit-actions">
+          <span class="hint">保存后这份成果会标记为「人工修订」,评审分只作历史参考;要让它成为最终版,保存后再点「定为最终版」。</span>
+          <div class="btns">
+            <el-button size="small" @click="toggleEdit">取消</el-button>
+            <el-button type="primary" size="small" :loading="saving" :disabled="!draft.trim()" @click="saveEdit">保存</el-button>
+          </div>
+        </div>
+      </div>
+      <article v-else class="md-content" :key="art.id" v-html="html"></article>
     </div>
     <div v-else class="art-loading">载入中……</div>
   </el-drawer>
@@ -59,9 +72,49 @@ const statusText = computed(() => ({
   DRAFT: '草稿', REVIEW: '待评审', APPROVED: '已通过', REJECTED: '未通过'
 }[art.value?.status] || art.value?.status || ''))
 
+/* ===== 人工修订:模型写的差一口气时直接改,不用整轮重跑 ===== */
+const editing = ref(false)
+const draft = ref('')
+const saving = ref(false)
+const adopting = ref(false)
+const canAdopt = computed(() => !!art.value && art.value.status !== 'APPROVED')
+
+function toggleEdit() {
+  if (!art.value) return
+  editing.value = !editing.value
+  if (editing.value) draft.value = art.value.content || ''
+  else draft.value = ''
+}
+
+async function saveEdit() {
+  if (!art.value) return
+  saving.value = true
+  try {
+    const r = await api.editArtifact(art.value.id, { content: draft.value })
+    art.value = { ...art.value, ...r }
+    editing.value = false
+    ElMessage({ message: '已保存为人工修订版', type: 'success', plain: true })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '保存失败')
+  } finally { saving.value = false }
+}
+
+async function adopt() {
+  if (!art.value) return
+  adopting.value = true
+  try {
+    const r = await api.adoptArtifact(art.value.id)
+    art.value = { ...art.value, ...r }
+    ElMessage({ message: '已定为最终版,对应交付物标记完成', type: 'success', plain: true })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '操作失败')
+  } finally { adopting.value = false }
+}
+
 watch(() => [props.modelValue, props.artifactId], async ([open, id]) => {
   if (!open || !id) return
   art.value = null
+  editing.value = false
   try { art.value = await api.artifact(id) } catch (e) { ElMessage.error('成果载入失败') }
 })
 
@@ -103,6 +156,17 @@ async function saveToDir() {
 .review-label { font-size: 10.5px; letter-spacing: .22em; color: var(--st-warn); margin-bottom: 6px; }
 .review-note p { margin: 0; font-size: 12.5px; line-height: 1.8; color: var(--text-dim); white-space: pre-wrap; }
 .art-loading { color: var(--text-faint); text-align: center; padding: 120px 0; letter-spacing: .3em; }
+/* 人工修订:正文变成可写的稿纸,不再只是展示 */
+.manual-tag { color: var(--st-warn); letter-spacing: .12em; }
+.art-edit { margin-top: 20px; }
+.art-edit :deep(.el-textarea__inner) {
+  background: var(--surface-2, rgba(255,255,255,.02)); color: var(--text-main);
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.9;
+  border-color: var(--border-hair); box-shadow: none;
+}
+.art-edit-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; }
+.art-edit-actions .hint { font-size: 11.5px; line-height: 1.7; color: var(--text-faint); }
+.art-edit-actions .btns { display: flex; gap: 8px; flex: none; }
 /* 翻开一份成果:正文像纸一样翻上来 */
 .md-content { animation: pageTurn .55s var(--ease-out) both; }
 .art-head { animation: riseIn .5s var(--ease-out) both; }

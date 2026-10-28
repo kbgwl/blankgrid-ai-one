@@ -52,7 +52,17 @@
               <div class="prov-grid">
                 <label class="pf"><span>名称</span><el-input v-model="p.name" placeholder="如:智谱 GLM" size="small" /></label>
                 <label class="pf wide"><span>Base URL</span><el-input v-model="p.baseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4" size="small" /></label>
-                <label class="pf"><span>默认模型</span><el-input v-model="p.model" placeholder="如:glm-4.6" size="small" /></label>
+                <label class="pf"><span>默认模型
+                  <button class="fetch-btn" :disabled="!p.baseUrl || !p.name || fetching === i"
+                          :title="p.name ? '从服务商拉取可用模型' : '先保存一次,拿到名称后再拉取'"
+                          @click="fetchModels(i)">{{ fetching === i ? '拉取中' : '拉取' }}</button>
+                </span>
+                  <el-select v-model="p.model" size="small" filterable allow-create default-first-option
+                             :loading="fetching === i"
+                             :placeholder="p.baseUrl ? '点「拉取」选模型,也可直接手填' : '先填 Base URL'">
+                    <el-option v-for="m in (modelOptions[p.baseUrl] || [])" :key="m" :label="m" :value="m" />
+                  </el-select>
+                </label>
                 <label class="pf"><span>API Key</span><el-input v-model="p.apiKey" placeholder="留空则不修改" size="small" show-password /></label>
                 <label class="pf check"><span>设为主用</span><el-switch v-model="p.primary" @change="onlyPrimary(i)" /></label>
                 <button class="pf-remove" @click="removeProvider(i)">移除</button>
@@ -74,8 +84,15 @@
                     <el-option v-for="(p, i) in form.providers" :key="i" :label="p.name || '未命名服务商'" :value="p.name" />
                   </el-select>
                 </label>
-                <label class="pf"><span>模型名</span>
-                  <el-input v-model="form.decisionModel" size="small" :placeholder="decisionModelHint" />
+                <label class="pf"><span>模型名
+                  <button class="fetch-btn" :disabled="!dsResolved || !dsResolved.baseUrl || !dsResolved.name || dsFetching"
+                          title="从该服务商拉取可用模型"
+                          @click="fetchDecisionModels">{{ dsFetching ? '拉取中' : '拉取' }}</button>
+                </span>
+                  <el-select v-model="form.decisionModel" size="small" filterable allow-create clearable
+                             :placeholder="decisionModelHint">
+                    <el-option v-for="m in (modelOptions[(dsResolved || {}).baseUrl] || [])" :key="m" :label="m" :value="m" />
+                  </el-select>
                 </label>
                 <label class="pf check"><span></span>
                   <el-button size="small" plain :loading="dsState.run" @click="testDecision">测一次</el-button>
@@ -187,6 +204,21 @@
               <div class="lbl"><b>立即备份</b><span>启动与每 6 小时自动备份,保留最近 7 份</span></div>
               <div class="ctl"><el-button size="small" :loading="backing" @click="doBackup">备份一次</el-button></div>
             </div>
+            <div class="set-row col backup-row">
+              <div class="lbl">
+                <b>已有备份</b>
+                <span>恢复不会在运行中动数据库:先暂存,重启后替换,原库另存一份可回退</span>
+              </div>
+              <div class="backup-list">
+                <div v-if="!backups.length" class="backup-none">还没有备份记录。</div>
+                <div v-for="b in backups" :key="b.name" class="backup-item">
+                  <span class="bi-name">{{ b.name }}</span>
+                  <span class="bi-size">{{ fmtSize(b.bytes) }}</span>
+                  <span class="bi-at">{{ fmtAt(b.at) }}</span>
+                  <button class="fetch-btn" :disabled="restoring" @click="restoreBackup(b.name)">恢复</button>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -218,7 +250,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { motionOk } from '../utils/motion'
 import { api } from '../api'
 
@@ -299,6 +331,37 @@ async function probe(i) {
 function onlyPrimary(i) {
   if (!form.value.providers[i].primary) return
   form.value.providers.forEach((p, n) => { if (n !== i) p.primary = false })
+}
+
+/* ===== 模型下拉:从服务商拉真实可用的模型名 =====
+   手敲模型名写错时接口返回 400,生产线整段停摆,排查成本比多按一次按钮高得多。
+   只对已保存的服务商生效——密钥存后端,这里只传服务商名,密钥不回浏览器。 */
+const modelOptions = reactive({})
+const fetching = ref(-1)
+const dsFetching = ref(false)
+
+async function fetchModelsFor(p, mark) {
+  if (!p || !p.baseUrl || !p.name) return
+  mark(true)
+  try {
+    const r = await api.settingsModels(p.name)
+    if (r.ok && r.models && r.models.length) {
+      modelOptions[p.baseUrl] = r.models
+      ElMessage({ message: `${p.name} 可用模型 ${r.models.length} 个`, type: 'success', plain: true })
+    } else {
+      ElMessage({ message: r.message || '没拿到模型列表,可以直接手填', type: 'warning', plain: true })
+    }
+  } catch (e) {
+    ElMessage.error('拉取失败,可以直接手填模型名')
+  } finally { mark(false) }
+}
+
+function fetchModels(i) {
+  if (fetching.value >= 0) return
+  fetchModelsFor(form.value.providers[i], (on) => { fetching.value = on ? i : -1 })
+}
+function fetchDecisionModels() {
+  fetchModelsFor(dsResolved.value, (on) => { dsFetching.value = on })
 }
 function addProvider() {
   form.value.providers.push({ name: '', baseUrl: '', apiKey: '', model: '', primary: !form.value.providers.length })
@@ -419,7 +482,49 @@ async function doBackup() {
   try {
     const r = await api.backupNow()
     ElMessage({ message: r.ok ? ('已备份:' + r.file) : '备份失败', type: r.ok ? 'success' : 'error', plain: true })
+    if (r.ok) await loadBackups()
   } finally { backing.value = false }
+}
+
+/* ===== 备份清单与恢复 ===== */
+const backups = ref([])
+const restoring = ref(false)
+
+async function loadBackups() {
+  try {
+    const r = await api.backups()
+    backups.value = r.items || []
+  } catch (e) { /* 清单拉不到不影响其它设置 */ }
+}
+
+function fmtSize(bytes) {
+  const n = Number(bytes) || 0
+  if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  return Math.max(1, Math.round(n / 1024)) + ' KB'
+}
+function fmtAt(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+async function restoreBackup(name) {
+  try {
+    await ElMessageBox.confirm(
+      `将把数据恢复到「${name}」的状态。恢复在下次启动时生效,当前库会另存一份,可回退。继续?`,
+      '恢复备份', { confirmButtonText: '准备恢复', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch (e) { return }
+  restoring.value = true
+  try {
+    const r = await api.restoreBackup(name)
+    if (r.ok) {
+      ElMessage({ message: r.message || '已准备好,重启后生效', type: 'success', plain: true, duration: 5200 })
+    } else {
+      ElMessage.error(r.message || '恢复失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '恢复失败')
+  } finally { restoring.value = false }
 }
 
 async function clearPassword() {
@@ -428,7 +533,10 @@ async function clearPassword() {
   form.value.password = ''
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  loadBackups()
+})
 onBeforeUnmount(() => observer && observer.disconnect())
 </script>
 
@@ -506,6 +614,15 @@ onBeforeUnmount(() => observer && observer.disconnect())
 }
 .set-row:last-child { border-bottom: 0; }
 .set-row.col { flex-direction: column; align-items: stretch; gap: 10px; }
+/* 备份清单:让人看得见"确实存下来了",而不是只有一个按钮 */
+.backup-list { display: flex; flex-direction: column; gap: 6px; }
+.backup-item {
+  display: grid; grid-template-columns: 1fr 74px 108px 52px; align-items: center; gap: 10px;
+  padding: 7px 10px; border: 1px solid var(--border-hair); border-radius: 7px;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim);
+}
+.backup-item .bi-size, .backup-item .bi-at { color: var(--text-faint); }
+.backup-none { font-size: 12px; color: var(--text-faint); }
 .set-row.col .lbl { margin-bottom: 2px; }
 .lbl b { display: block; font-size: 12.5px; font-weight: 400; letter-spacing: .1em; color: var(--text-moon); }
 .lbl span { display: block; margin-top: 4px; font-size: 11px; line-height: 1.7; color: var(--text-faint); }
@@ -573,6 +690,14 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .pf.wide { flex: 1; min-width: 260px; }
 .pf.check { width: auto; justify-content: flex-end; }
 .pf > span { font-size: 10.5px; letter-spacing: .18em; color: var(--text-dim); }
+/* 模型下拉旁的「拉取」:次要动作,不能抢主按钮的注意力 */
+.fetch-btn {
+  margin-left: 6px; padding: 0 5px; border: 1px solid var(--border-hair); border-radius: 4px;
+  background: transparent; color: var(--text-faint); font-size: 10px; letter-spacing: .06em;
+  cursor: pointer; transition: color .15s, border-color .15s;
+}
+.fetch-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.fetch-btn:disabled { opacity: .35; cursor: not-allowed; }
 .pf-remove {
   align-self: flex-end; background: none; border: none; cursor: pointer; padding: 4px 2px;
   font-size: 11px; letter-spacing: .1em; color: var(--text-faint); transition: color .3s var(--ease-quiet);

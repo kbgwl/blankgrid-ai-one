@@ -68,6 +68,42 @@ public class OpsController {
         return Map.of("ok", name != null, "file", name == null ? "" : name);
     }
 
+    /** 现有备份清单:能看见备份才算真的备份过 */
+    @GetMapping("/backups")
+    public Map<String, Object> backups() {
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+        for (java.nio.file.Path p : backupService.list()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", p.getFileName().toString());
+            try {
+                m.put("bytes", java.nio.file.Files.size(p));
+                m.put("at", java.nio.file.Files.getLastModifiedTime(p).toInstant());
+            } catch (Exception ignored) {
+                // 单个文件读不到不影响整份清单
+            }
+            items.add(m);
+        }
+        return Map.of("items", items);
+    }
+
+    public static class RestoreBody {
+        public String file;
+    }
+
+    /**
+     * 恢复到某份备份。运行中不直接换库文件,只做暂存 + 标记,重启后由 RestoreApplier 在 JPA 之前完成替换。
+     */
+    @PostMapping("/restore")
+    public Map<String, Object> restore(@RequestBody RestoreBody body) {
+        try {
+            String name = backupService.stageRestore(body.file);
+            return Map.of("ok", true, "file", name, "restartRequired", true,
+                    "message", "已准备好,重启后生效;原数据库会另存一份,可回退。");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return Map.of("ok", false, "message", e.getMessage() == null ? "恢复失败" : e.getMessage());
+        }
+    }
+
     /** 手动触发一轮 CEO 巡视 */
     @PostMapping("/ceo-cycle")
     public Map<String, Object> ceoCycle() {

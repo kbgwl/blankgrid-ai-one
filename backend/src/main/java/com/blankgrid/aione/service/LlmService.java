@@ -147,4 +147,59 @@ public class LlmService {
         out.put("ms", System.currentTimeMillis() - t0);
         return out;
     }
+
+    /**
+     * 拉取服务商可用模型列表(OpenAI 兼容的 GET /models),供前端做下拉选择。
+     * 手敲模型名很容易写错,而写错的表现是接口 400、生产线整段停摆,排查成本很高。
+     * 密钥只在服务端使用,不回传给浏览器。
+     */
+    public Map<String, Object> listModels(Provider p) {
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        long t0 = System.currentTimeMillis();
+        out.put("ok", false);
+        out.put("models", java.util.List.of());
+        if (p == null) {
+            out.put("message", "还没有服务商,请先在上面填写一个");
+            return out;
+        }
+        if (p.baseUrl == null || p.baseUrl.isBlank()) {
+            out.put("message", "该服务商没有填 Base URL");
+            return out;
+        }
+        String url = p.baseUrl.replaceAll("/+$", "") + "/models";
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Authorization", "Bearer " + (p.apiKey == null ? "" : p.apiKey))
+                    .GET()
+                    .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                out.put("message", "拉取失败,HTTP " + resp.statusCode() + ":" + truncate(resp.body(), 200));
+                out.put("ms", System.currentTimeMillis() - t0);
+                return out;
+            }
+            JsonNode root = mapper.readTree(resp.body());
+            JsonNode arr = root.path("data");
+            if (!arr.isArray()) arr = root.path("models");
+            java.util.List<String> ids = new java.util.ArrayList<>();
+            if (arr.isArray()) {
+                for (JsonNode n : arr) {
+                    String id = n.path("id").asText("");
+                    if (id.isBlank()) id = n.asText("");
+                    if (!id.isBlank()) ids.add(id);
+                }
+            }
+            java.util.Collections.sort(ids);
+            out.put("ok", true);
+            out.put("models", ids);
+            out.put("message", ids.isEmpty() ? "服务商没返回模型列表,可以直接手填模型名" : "可用模型 " + ids.size() + " 个");
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            out.put("message", "拉取失败:" + truncate(msg, 160));
+        }
+        out.put("ms", System.currentTimeMillis() - t0);
+        return out;
+    }
 }

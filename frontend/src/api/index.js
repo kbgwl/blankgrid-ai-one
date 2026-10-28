@@ -51,6 +51,10 @@ export const api = {
   exportStatus: () => http.get('/settings/export').then(r => r.data),
   // 自检是真发一次模型请求,给它 25 秒上限:后端没起来时要失败而不是把按钮挂死
   settingsTest: (body) => http.post('/settings/test', body || {}, { timeout: 25000 }).then(r => r.data),
+  // 拉服务商的可用模型:手敲模型名写错会让整条生产线 400,这里列出真实可用的
+  settingsModels: (provider) => http.get('/settings/models', {
+    params: provider ? { provider } : {}, timeout: 25000
+  }).then(r => r.data),
 
   opsFeed: () => http.get('/ops/feed').then(r => r.data),
   setGoal: (content) => http.post('/ops/goal', { content }).then(r => r.data),
@@ -58,6 +62,8 @@ export const api = {
   ackActivity: (id) => http.post(`/ops/${id}/ack`).then(r => r.data),
   ceoCycle: () => http.post('/ops/ceo-cycle').then(r => r.data),
   backupNow: () => http.post('/ops/backup').then(r => r.data),
+  backups: () => http.get('/ops/backups').then(r => r.data),
+  restoreBackup: (file) => http.post('/ops/restore', { file }).then(r => r.data),
 
   goals: () => http.get('/goals', { timeout: LIST_TIMEOUT }).then(r => r.data),
   goal: (id) => http.get(`/goals/${id}`, { timeout: LIST_TIMEOUT }).then(r => r.data),
@@ -70,9 +76,13 @@ export const api = {
   retryWorkstream: (goalId, wsId) => http.post(`/goals/${goalId}/workstreams/${wsId}/retry`).then(r => r.data),
   retryDeliverable: (goalId, dId) => http.post(`/goals/${goalId}/deliverables/${dId}/retry`).then(r => r.data),
   provideInputs: (goalId, facts) => http.post(`/goals/${goalId}/inputs`, { facts }).then(r => r.data),
+  addGoalBudget: (goalId, tokens) => http.post(`/goals/${goalId}/budget`, { tokens }).then(r => r.data),
 
   artifacts: (params) => http.get('/artifacts', { params, timeout: LIST_TIMEOUT }).then(r => r.data),
   artifact: (id) => http.get(`/artifacts/${id}`, { timeout: LIST_TIMEOUT }).then(r => r.data),
+  // 人工修订与定稿:模型写的差一口气时,人可以直接改,不用重跑一轮
+  editArtifact: (id, body) => http.put(`/artifacts/${id}`, body).then(r => r.data),
+  adoptArtifact: (id) => http.post(`/artifacts/${id}/adopt`).then(r => r.data),
 
   // 落盘:写进设置页指定的目录,返回真实路径而不是让浏览器再下载一份
   exportGoalToDir: (id) => http.post(`/goals/${id}/export-to-dir`, {}, { timeout: 30000 }).then(r => r.data),

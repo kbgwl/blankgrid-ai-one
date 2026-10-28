@@ -54,6 +54,8 @@ public class CompanyEngineService {
 
     private final Set<Long> planningGoals = ConcurrentHashMap.newKeySet();
     private final Set<Long> planningWorkstreams = ConcurrentHashMap.newKeySet();
+    /** 跨部门拆活查重的临界区:两个部门可能同时落库,读清单与写入必须在同一把锁里 */
+    private final Object planLock = new Object();
     private final ExecutorService planner = Executors.newFixedThreadPool(2, r -> {
         Thread t = new Thread(r, "company-planner");
         t.setDaemon(true);
@@ -124,6 +126,10 @@ public class CompanyEngineService {
                 if (g == null || Goal.PAUSED.equals(g.getStatus()) || Goal.DONE.equals(g.getStatus())) continue;
                 if (delRepo.countByWorkstreamId(ws.getId()) == 0) requestWorkstreamPlan(ws.getId());
             }
+            // 并发上限:同一时刻最多有这么多交付物在跑,其余排队等空位。
+            // 不限并发会同时打出十几个请求,撞服务商限流后全部失败重试,比串行更慢也更贵。
+            int limit = Math.max(1, settings.get().concurrency);
+            int running = delRepo.findByStatusIn(List.of(Deliverable.RUNNING)).size();
             for (Deliverable d : delRepo.findByStatusIn(List.of(Deliverable.PENDING, Deliverable.READY,
                     Deliverable.WAITING))) {
                 Goal g = d.getGoal();
@@ -144,7 +150,9 @@ public class CompanyEngineService {
                     delRepo.save(d);
                     activity(Activity.REPORT, "上游已交付,「" + d.getTitle() + "」重新进入执行队列。", g.getId());
                 }
+                if (running >= limit) continue;             // 已到并发上限,留在队列里等下一轮
                 startWork(d);
+                running++;
             }
             recoverStaleDeliverables();
             recoverReviewStages();
@@ -278,6 +286,8 @@ public class CompanyEngineService {
         sb.append("\n【拆解要求】\n");
         sb.append("1. 只拆 2-5 条部门工作流,每条必须能独立验收;不需要的部门不要硬凑。\n");
         sb.append("2. 每条工作流写清楚:要产出什么、为什么需要、整体验收标准;不写具体执行步骤。\n");
+        sb.append("2.1 不同部门不许认领同一份产出。同一件东西(例如“产品页主体文案”)只能由一个部门负责,"
+                + "其他部门需要时直接复用那一份,不要各自立一条工作流——重复开工只会互相挡住、白烧预算。\n");
         sb.append("3. 负责人必须使用上面列出的该部门负责人 id;部门 id 必须准确。\n");
         sb.append("4. 验收标准必须可检查:数量、结构、覆盖范围、可用性、证据要求。禁止“高质量”“尽量完善”这类空话。\n");
         sb.append("5. 缺信息分两种处理,不要混为一谈:\n");
@@ -359,46 +369,69 @@ public class CompanyEngineService {
         String summary = root.path("summary").asText("负责人已完成拆解");
         JsonNode arr = root.path("deliverables");
         List<Deliverable> created = new ArrayList<>();
-        List<Integer> indices = new ArrayList<>();
+        // 本次拆解下标 → 真实交付物 id。重复项被合并时,下标指向被合并到的那一项,依赖才不会断。
+        Map<Integer, Long> indexToId = new LinkedHashMap<>();
+        Map<Long, Integer> pendingDep = new LinkedHashMap<>();
+        List<String> merged = new ArrayList<>();
         int order = 0;
-        if (arr.isArray()) {
-            for (JsonNode node : arr) {
-                if (order >= 8) break;
-                String title = clip(node.path("title").asText(""), 300);
-                if (title.isBlank()) continue;
-                Employee owner = findTeamMember(team, node.path("ownerId").asLong(0));
-                if (owner == null) owner = lead;
-                Deliverable d = new Deliverable();
-                d.setGoal(g);
-                d.setWorkstream(ws);
-                d.setOwner(owner);
-                d.setReviewer(pickReviewer(ws, owner));
-                d.setTitle(title);
-                d.setBrief(clip(node.path("brief").asText(""), 8000));
-                d.setAcceptanceCriteria(clip(node.path("acceptanceCriteria").asText(""), 8000));
-                d.setOutputType(clip(node.path("outputType").asText("文档"), 40));
-                String priority = node.path("priority").asText("MEDIUM").toUpperCase(Locale.ROOT);
-                d.setPriority(List.of("HIGH", "MEDIUM", "LOW").contains(priority) ? priority : "MEDIUM");
-                d.setDueAt(parseInstant(node.path("dueAt").asText("")));
-                if (d.getDueAt() == null) d.setDueAt(ws.getDueAt() != null ? ws.getDueAt() : g.getDeadline());
-                d.setSortOrder(++order);
-                d.setStatus(Deliverable.PENDING);
-                created.add(delRepo.save(d));
-                JsonNode deps = node.path("dependsOn");
-                int depIndex = -1;
-                if (deps.isArray() && !deps.isEmpty()) depIndex = deps.get(0).asInt(-1);
-                indices.add(depIndex);
+        String deptName = ws.getDepartment() == null ? "部门" : ws.getDepartment().getName();
+        // 两个部门可能同时拆活:读已有清单与落库必须在同一把锁里,否则各自都看不到对方刚写进去的东西
+        synchronized (planLock) {
+            List<String[]> existing = goalDeliverableTitles(g.getId());
+            if (arr.isArray()) {
+                int idx = 0;
+                for (JsonNode node : arr) {
+                    int myIndex = idx++;
+                    if (order >= 8) break;
+                    String title = clip(node.path("title").asText(""), 300);
+                    if (title.isBlank()) continue;
+                    String[] dup = DeliverableDedup.findDuplicate(title, existing);
+                    if (dup != null) {
+                        indexToId.put(myIndex, Long.parseLong(dup[0]));
+                        merged.add("「" + title + "」并入「" + dup[1] + "」");
+                        continue;
+                    }
+                    Employee owner = findTeamMember(team, node.path("ownerId").asLong(0));
+                    if (owner == null) owner = lead;
+                    Deliverable d = new Deliverable();
+                    d.setGoal(g);
+                    d.setWorkstream(ws);
+                    d.setOwner(owner);
+                    d.setReviewer(pickReviewer(ws, owner));
+                    d.setTitle(title);
+                    d.setBrief(clip(node.path("brief").asText(""), 8000));
+                    d.setAcceptanceCriteria(clip(node.path("acceptanceCriteria").asText(""), 8000));
+                    d.setOutputType(clip(node.path("outputType").asText("文档"), 40));
+                    String priority = node.path("priority").asText("MEDIUM").toUpperCase(Locale.ROOT);
+                    d.setPriority(List.of("HIGH", "MEDIUM", "LOW").contains(priority) ? priority : "MEDIUM");
+                    d.setDueAt(parseInstant(node.path("dueAt").asText("")));
+                    if (d.getDueAt() == null) d.setDueAt(ws.getDueAt() != null ? ws.getDueAt() : g.getDeadline());
+                    d.setSortOrder(++order);
+                    d.setStatus(Deliverable.PENDING);
+                    Deliverable saved = delRepo.save(d);
+                    created.add(saved);
+                    existing.add(new String[]{String.valueOf(saved.getId()), title});
+                    indexToId.put(myIndex, saved.getId());
+                    JsonNode deps = node.path("dependsOn");
+                    if (deps.isArray() && !deps.isEmpty()) pendingDep.put(saved.getId(), deps.get(0).asInt(-1));
+                }
             }
         }
-        // 依赖按本次拆解内的下标映射为真实 id
-        for (int i = 0; i < created.size(); i++) {
-            int idx = indices.get(i);
-            if (idx >= 0 && idx < created.size() && idx != i) {
-                created.get(i).setDependencies(String.valueOf(created.get(idx).getId()));
-                delRepo.save(created.get(i));
-            }
+        // 依赖按本次拆解内的下标映射为真实 id;被合并掉的那一项也能映射到真正承担它的交付物
+        for (Map.Entry<Long, Integer> e : pendingDep.entrySet()) {
+            Long selfId = e.getKey();
+            Long targetId = indexToId.get(e.getValue());
+            if (targetId == null || targetId.equals(selfId)) continue;
+            Deliverable d = delRepo.findById(selfId).orElse(null);
+            if (d == null) continue;
+            d.setDependencies(String.valueOf(targetId));
+            delRepo.save(d);
         }
-        if (created.isEmpty()) {
+        if (!merged.isEmpty()) {
+            activity(Activity.REPORT, "「" + deptName + "」有 " + merged.size()
+                    + " 项与其他部门重复,已合并,不重复开工:" + clip(String.join(";", merged), 600), g.getId());
+        }
+        if (created.isEmpty() && merged.isEmpty()) {
             // 负责人没拆出有效交付物时,至少保证工作流有一个可验收出口
             Deliverable d = new Deliverable();
             d.setGoal(g);
@@ -423,9 +456,22 @@ public class CompanyEngineService {
 
         recordNeedsInput(g, root.path("needsInput"), ws.getDepartment() == null ? "部门负责人" : ws.getDepartment().getName());
 
-        activity(Activity.REPORT, "部门「" + ws.getDepartment().getName() + "」已拆出 "
-                + created.size() + " 项交付物:" + clip(summary, 500), g.getId());
+        if (created.isEmpty()) {
+            activity(Activity.REPORT, "「" + deptName + "」本次没有新立项:它要的产出已由其他部门承担,直接引用对方的交付物。", g.getId());
+        } else {
+            activity(Activity.REPORT, "部门「" + deptName + "」已拆出 "
+                    + created.size() + " 项交付物:" + clip(summary, 500), g.getId());
+        }
         pushGoal(g.getId());
+    }
+
+    /** 同一目标下已有交付物的 [id, 标题],供跨部门查重。 */
+    private List<String[]> goalDeliverableTitles(Long goalId) {
+        List<String[]> out = new ArrayList<>();
+        for (Deliverable d : delRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId)) {
+            out.add(new String[]{String.valueOf(d.getId()), d.getTitle() == null ? "" : d.getTitle()});
+        }
+        return out;
     }
 
     private String buildWorkstreamPrompt(Goal g, Workstream ws, Employee lead, List<Employee> team) {
@@ -438,6 +484,12 @@ public class CompanyEngineService {
         sb.append("标题:").append(ws.getTitle()).append("\n");
         sb.append("说明:").append(nz(ws.getBrief())).append("\n");
         sb.append("整体验收标准:").append(nz(ws.getAcceptanceCriteria())).append("\n\n");
+        List<String[]> taken = goalDeliverableTitles(g.getId());
+        if (!taken.isEmpty()) {
+            sb.append("【其他部门已经在做的交付物】\n");
+            for (String[] t : taken) sb.append("- ").append(t[1]).append("\n");
+            sb.append("同一件东西只做一次:上面已有的产出不要重复立项,需要时直接作为你的输入引用。\n\n");
+        }
         sb.append("【你部门可调用的岗位】\n");
         for (Employee e : team) {
             sb.append("- id=").append(e.getId()).append(" ").append(e.getName())

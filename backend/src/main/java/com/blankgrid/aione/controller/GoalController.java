@@ -93,6 +93,18 @@ public class GoalController {
         public String facts;
     }
 
+    public static class BudgetBody {
+        /** 追加的 token 额度(正数,累加在原预算上) */
+        public long tokens;
+    }
+
+    /** 预算用尽后追加额度;追加后自动恢复推进,不用再点一次恢复。 */
+    @PostMapping("/{id}/budget")
+    public Map<String, Object> addBudget(@PathVariable Long id, @RequestBody BudgetBody body) {
+        Goal g = goals.addBudget(id, body.tokens);
+        return goals.summary(g);
+    }
+
     /** 创始人补料:把已核实的事实写进去,受阻的交付物会重新排队。 */
     @PostMapping("/{id}/inputs")
     public Map<String, Object> inputs(@PathVariable Long id, @RequestBody InputBody body) {

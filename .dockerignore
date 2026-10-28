@@ -1,0 +1,14 @@
+# 工具链与依赖不进镜像:镜像里由 maven / node 阶段自行准备
+tools/
+frontend/node_modules/
+backend/target/
+# 本机数据与产出:一律通过挂卷提供,不打进镜像
+data/
+exports/
+logs/
+dist/
+# 版本库与编辑器
+.git/
+.idea/
+.vscode/
+*.log

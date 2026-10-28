@@ -42,6 +42,17 @@ public class SettingsController {
     }
 
     /**
+     * 服务商的可用模型列表。body/参数二选一:?provider=服务商名,不传则用主用服务商。
+     * 前端用它填模型下拉,避免手敲模型名写错导致整条生产线 400。
+     */
+    @GetMapping("/models")
+    public Map<String, Object> models(@RequestParam(required = false) String provider) {
+        Provider p = (provider == null || provider.isBlank())
+                ? settingsService.primaryProvider() : settingsService.providerByName(provider);
+        return llmService.listModels(p);
+    }
+
+    /**
      * 真发一次最小请求测连通。body 可选:{"provider":"服务商名"} 指定对象,
      * {"scope":"decision"} 测 CEO 决策槽位,{"model":"模型名"} 临时换模型名。
      * 不点名模型时按「这条链路真会用的模型」测,否则绿灯测的是 A、CEO 跑的是 B。

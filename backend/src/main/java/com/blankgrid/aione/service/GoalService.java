@@ -91,6 +91,84 @@ public class GoalService {
         return g;
     }
 
+    /**
+     * 追加 token 预算。预算用尽时目标会被自动暂停,这里补上额度后自动恢复,
+     * 不用再点一次「恢复」——那一步对创始人来说没有意义。
+     */
+    /**
+     * 人工修订成果正文。评审不过或者差一口气的时候,创始人应该能自己动手改,
+     * 而不是只能反复重跑模型。改过的成果打上 manualEdit,评审分只作历史参考。
+     */
+    @Transactional
+    public Artifact editArtifact(Long id, String title, String content) {
+        Artifact a = artRepo.findById(id).orElseThrow(() -> new IllegalArgumentException("成果不存在"));
+        if (title != null && !title.isBlank()) a.setTitle(title.trim());
+        if (content != null) a.setContent(content);
+        a.setManualEdit(true);
+        artRepo.save(a);
+        Activity ac = new Activity(Activity.REPORT, "创始人手工修订了成果「" + a.getTitle() + "」。", null);
+        ac.setGoalId(a.getGoalId());
+        activityRepo.save(ac);
+        if (a.getGoalId() != null) push(goalRepo.findById(a.getGoalId()).orElse(null));
+        return a;
+    }
+
+    /**
+     * 人工定稿:把这份成果直接定为本项目的最终版,并把它对应的交付物置为完成,
+     * 下游等待中的交付物会自动被引擎唤醒。
+     */
+    @Transactional
+    public Artifact adoptArtifact(Long id) {
+        Artifact a = artRepo.findById(id).orElseThrow(() -> new IllegalArgumentException("成果不存在"));
+        a.setStatus(Artifact.APPROVED);
+        a.setApprovedAt(Instant.now());
+        if (a.getScore() <= 0) a.setScore(85);
+        artRepo.save(a);
+
+        Deliverable d = a.getDeliverable();
+        if (d != null && !Deliverable.DONE.equals(d.getStatus())) {
+            d.setStatus(Deliverable.DONE);
+            d.setArtifactId(a.getId());
+            d.setCurrentTaskId(null);
+            d.setReviewAttempts(0);
+            d.setReviewScore(Math.max(d.getReviewScore(), a.getScore()));
+            d.setReviewNotes("创始人手工定稿,视为通过。");
+            d.setUpdatedAt(Instant.now());
+            delRepo.save(d);
+        }
+        if (a.getGoalId() != null) {
+            refreshProgress(a.getGoalId());
+            Activity ac = new Activity(Activity.REPORT,
+                    "创始人把「" + a.getTitle() + "」定为最终版,对应交付物已标记完成。", null);
+            ac.setGoalId(a.getGoalId());
+            activityRepo.save(ac);
+            push(goalRepo.findById(a.getGoalId()).orElse(null));
+        }
+        return a;
+    }
+
+    @Transactional
+    public Goal addBudget(Long id, long tokens) {
+        Goal g = goalRepo.findById(id).orElseThrow(() -> new IllegalArgumentException("目标不存在"));
+        if (tokens <= 0) throw new IllegalArgumentException("追加额度必须大于 0");
+        g.setBudgetTokens(g.getBudgetTokens() + tokens);
+        boolean wasPausedForBudget = Goal.PAUSED.equals(g.getStatus())
+                && g.getCeoSummary() != null && g.getCeoSummary().contains("预算");
+        if (wasPausedForBudget) {
+            g.setStatus(wsRepo.countByGoalId(id) > 0 ? Goal.ACTIVE : Goal.PLANNING);
+            g.setCeoSummary("");
+        }
+        g.setUpdatedAt(Instant.now());
+        goalRepo.save(g);
+
+        Activity a = new Activity(Activity.REPORT, "创始人给目标「" + g.getTitle() + "」追加了 "
+                + tokens + " token 预算" + (wasPausedForBudget ? ",已自动恢复推进。" : "。"), null);
+        a.setGoalId(id);
+        activityRepo.save(a);
+        push(g);
+        return g;
+    }
+
     @Transactional
     public Goal resume(Long id) {
         Goal g = goalRepo.findById(id).orElseThrow(() -> new IllegalArgumentException("目标不存在"));
@@ -454,6 +532,7 @@ public class GoalService {
     }
 
     private void push(Goal g) {
+        if (g == null) return;
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("goal", g);
         pusher.push("goal-update", p);
