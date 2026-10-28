@@ -34,6 +34,15 @@ public class CompanyEngineService {
 
     private static final Logger log = LoggerFactory.getLogger(CompanyEngineService.class);
 
+    /**
+     * 结构化调用的输出上限。中文长清单(4-5 条工作流 + 若干条待补事项)很容易越过 4K,
+     * 服务商默认值就在那儿,越过去的表现不是报错,而是"输出不像 JSON"—— 其实是被截断了。
+     */
+    private static final int PLAN_MAX_TOKENS = 8000;
+
+    @org.springframework.beans.factory.annotation.Value("${aione.data-dir:./data}")
+    private String dataDir;
+
     private final GoalRepository goalRepo;
     private final WorkstreamRepository wsRepo;
     private final DeliverableRepository delRepo;
@@ -203,23 +212,39 @@ public class CompanyEngineService {
                 + "\n\n【你的职责边界】\n你只做公司级拆解:把目标分给最合适的部门负责人。你不亲自写交付物,不替部门决定具体执行细节。";
         String user = buildPlanPrompt(g, departments);
 
-        // 目标拆解同样是 CEO 的决策,和巡视走同一个决策模型槽位
+        // 目标拆解同样是 CEO 的决策,和巡视走同一个决策模型槽位。
+        // 这一调用必须吐结构化数据:服务端强制 JSON 输出,并把输出上限调高 ——
+        // 默认 4K 的上限装不下"4 条工作流 + 3 条待补事项"的中文描述,写到一半就断,
+        // 断在数组里就是"不是有效 JSON",整条生产线卡在第一步。
         String planModel = settings.decisionModel(ceo.getModel());
         String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
-                planModel, null, settings.decisionProvider());
+                planModel, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
         tokenRepo.save(new TokenLog(null, goalId, "CEO_PLAN",
                 CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), planModel));
 
-        JsonNode root;
-        try {
-            root = mapper.readTree(extractJson(reply));
-        } catch (Exception e) {
-            throw new IllegalStateException("CEO 拆解结果不是有效 JSON: " + clip(reply, 300));
+        boolean truncated = llm.lastTruncated() || LooseJson.looksTruncated(reply);
+        JsonNode root = LooseJson.parse(mapper, reply);
+        if (root == null) {
+            log.warn("CEO 拆解 JSON 解析失败(目标 {},截断={},{} 字),让模型自修一次", goalId, truncated, reply.length());
+            dumpRaw("ceo-plan", goalId, reply);
+            String fixed = repairJson(reply, planModel, goalId,
+                    "summary(字符串)、needsInput(字符串数组)、workstreams(数组,每项含 departmentId/leadId/title/brief/acceptanceCriteria/dueAt)");
+            root = LooseJson.parse(mapper, fixed);
+            if (root != null) truncated = false;
+        }
+        if (root == null) {
+            throw new IllegalStateException("CEO 拆解结果不是有效 JSON"
+                    + (truncated ? "(模型输出被截断,已自动重试修复仍失败)" : "")
+                    + ": " + clip(reply, 300));
         }
         String summary = root.path("summary").asText("CEO 已完成拆解");
         JsonNode arr = root.path("workstreams");
         if (!arr.isArray() || arr.isEmpty()) {
-            throw new IllegalStateException("CEO 没有拆出任何部门工作流,请检查目标描述或模型输出");
+            // 工作流没拆出来,但待补事项是有效的:先记下来,创始人补完料再点「重新拆解」,
+            // 总比只留一句"拆解失败"、不知道缺什么强。
+            recordNeedsInput(g, root.path("needsInput"), "CEO");
+            throw new IllegalStateException("CEO 没有拆出任何部门工作流"
+                    + (truncated ? "(模型输出被截断,建议把目标写短一些)" : "") + ",请检查目标描述或模型输出");
         }
 
         List<Workstream> created = new ArrayList<>();
@@ -253,6 +278,10 @@ public class CompanyEngineService {
 
         activity(Activity.REPORT, "CEO 已拆解目标「" + g.getTitle() + "」:" + clip(summary, 600)
                 + " 共 " + created.size() + " 条部门工作流。", goalId);
+        if (truncated) {
+            activity(Activity.REPORT, "提醒:CEO 的输出撞到了输出上限被截断,已按写完的部分拆出 "
+                    + created.size() + " 条工作流。目标描述写短一点、少列几件要核实的资料,拆解会更完整。", goalId);
+        }
         pushGoal(goalId);
         for (Workstream ws : created) requestWorkstreamPlan(ws.getId());
     }
@@ -309,6 +338,9 @@ public class CompanyEngineService {
         sb.append("\"needsInput\":[\"待创始人核实的事项 —— 为什么必须要,没有它会怎样\"],\"workstreams\":[");
         sb.append("{\"departmentId\":1,\"leadId\":12,\"title\":\"工作流标题\",\"brief\":\"要产出的内容与假设\",");
         sb.append("\"acceptanceCriteria\":\"逐条可检查的验收标准\",\"dueAt\":\"2026-11-01T00:00:00Z 或空\"}]}");
+        sb.append("\n篇幅硬约束:整段 JSON 不超过 1200 字 —— brief 每条 ≤120 字,acceptanceCriteria ≤200 字,"
+                + "needsInput 最多 3 条、每条 ≤80 字。写不完就压缩措辞,但**不许省略 JSON 结构**"
+                + "(少一个括号,下游解析就整段失败,等于白拆)。\n");
         sb.append("\nneedsInput 只放真的必须由创始人提供的外部事实(产品事实、真实数据、对外口径、资质);"
                 + "本公司内部谁都能自己产出的东西(清单、说明、方案)不要往里塞。没有就写 []。");
         return sb.toString();
@@ -361,15 +393,25 @@ public class CompanyEngineService {
         String user = buildWorkstreamPrompt(g, ws, lead, team);
 
         String leadModel = (lead.getModel() != null && !lead.getModel().isBlank()) ? lead.getModel() : settings.defaultModel();
-        String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)), lead.getModel(), null);
+        // 和 CEO 拆解同一套要求:强制 JSON + 放宽输出上限,不靠模型自觉
+        String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                lead.getModel(), null, null, true, PLAN_MAX_TOKENS);
         tokenRepo.save(new TokenLog(null, g.getId(), "LEAD_PLAN",
                 CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), leadModel));
 
-        JsonNode root;
-        try {
-            root = mapper.readTree(extractJson(reply));
-        } catch (Exception e) {
-            throw new IllegalStateException("负责人拆解结果不是有效 JSON: " + clip(reply, 300));
+        boolean truncated = llm.lastTruncated() || LooseJson.looksTruncated(reply);
+        JsonNode root = LooseJson.parse(mapper, reply);
+        if (root == null) {
+            log.warn("负责人拆解 JSON 解析失败(工作流 {},截断={},{} 字),让模型自修一次", wsId, truncated, reply.length());
+            dumpRaw("lead-plan", ws.getId(), reply);
+            String fixed = repairJson(reply, leadModel, g.getId(),
+                    "summary(字符串)、needsInput(字符串数组)、deliverables(数组,每项含 title/brief/acceptanceCriteria/ownerId/dependsOn)");
+            root = LooseJson.parse(mapper, fixed);
+            if (root != null) truncated = false;
+        }
+        if (root == null) {
+            throw new IllegalStateException("负责人拆解结果不是有效 JSON"
+                    + (truncated ? "(模型输出被截断,已自动重试修复仍失败)" : "") + ": " + clip(reply, 300));
         }
         String summary = root.path("summary").asText("负责人已完成拆解");
         JsonNode arr = root.path("deliverables");
@@ -552,6 +594,8 @@ public class CompanyEngineService {
         sb.append("{\"ownerId\":21,\"title\":\"交付物标题\",\"brief\":\"具体要做什么\",");
         sb.append("\"acceptanceCriteria\":\"逐条验收标准\",\"outputType\":\"文档\",");
         sb.append("\"dependsOn\":[],\"priority\":\"HIGH\",\"dueAt\":\"2026-11-01T00:00:00Z 或空\"}]}");
+        sb.append("\n篇幅硬约束:整段 JSON 不超过 1500 字 —— 每项 brief ≤100 字,acceptanceCriteria ≤200 字,"
+                + "needsInput 最多 3 条。写不完就压缩措辞,但**不许省略 JSON 结构**。\n");
         sb.append("\nneedsInput 没有就写 [],只放公司外部、只能由创始人给出的事实(产品事实、真实数据、对外口径、资质);"
                 + "本部门或别的部门自己能产出的东西不要填 —— 那是派活,不是缺料。");
         return sb.toString();
@@ -1212,7 +1256,8 @@ public class CompanyEngineService {
         if (g == null || arr == null || !arr.isArray() || arr.isEmpty()) return;
         Goal fresh = goalRepo.findById(g.getId()).orElse(null);
         if (fresh == null) return;
-        List<String> items = parseNeedsInput(fresh.getNeedsInput());
+        List<String> before = parseNeedsInput(fresh.getNeedsInput());
+        List<String> items = new ArrayList<>(compactTopics(before));
         List<String> added = new ArrayList<>();
         for (JsonNode n : arr) {
             String text;
@@ -1225,14 +1270,29 @@ public class CompanyEngineService {
             String item = clip(text.trim(), 280);
             if (item.isBlank()) continue;
             if (items.stream().anyMatch(x -> similar(x, item))) continue;
+            // 同一类事实只问一次:CEO 和三个部门负责人各问一遍"你的产品是什么",
+            // 创始人看到的是四条重复的待补,反而不知道该填哪条。按主题收敛,保留信息更全的那条。
+            String topic = factTopic(item);
+            if (topic != null) {
+                int at = -1;
+                for (int i = 0; i < items.size(); i++) {
+                    if (topic.equals(factTopic(items.get(i)))) { at = i; break; }
+                }
+                if (at >= 0) {
+                    if (item.length() > items.get(at).length()) items.set(at, item);
+                    continue;
+                }
+            }
             items.add(item);
             added.add(item);
         }
-        if (added.isEmpty()) return;
+        boolean shrunk = items.size() < before.size();
+        if (added.isEmpty() && !shrunk) return;
         while (items.size() > 12) items.remove(0);
         fresh.setNeedsInput(writeNeedsInput(items));
         fresh.setUpdatedAt(Instant.now());
         goalRepo.save(fresh);
+        if (added.isEmpty()) return;   // 只是把重复项收敛了,不用再喊一遍
         activity(Activity.ESCALATION, from + "需要你先确认 " + added.size() + " 件事,"
                 + "否则这部分成果只能靠编:" + clip(String.join(";", added), 700), fresh.getId());
         pushEscalation();
@@ -1252,6 +1312,55 @@ public class CompanyEngineService {
 
     private String norm(String s) {
         return s == null ? "" : s.replaceAll("[\\s,，。.、:：;；()（）\\[\\]【】《》\"'“”‘’—\\-]+", "");
+    }
+
+    /**
+     * 待补事项的主题分类。同一类事实只该问一次。
+     * 顺序即优先级:越具体的放越前 —— 「表单接收邮箱」属于表单服务,不是联系方式,
+     * 否则两件必须分别确认的事会被合并掉,反而漏料。没命中任何主题就返回 null(不做合并)。
+     */
+    private static final String[][] FACT_TOPICS = {
+            {"表单服务", "表单", "formspree", "emailjs", "接收邮箱"},
+            {"备案", "备案", "icp"},
+            {"域名与托管", "域名", "托管", "vercel", "netlify", "服务器", "部署账号"},
+            {"客户案例", "客户", "案例", "业绩", "项目数量", "营收"},
+            {"产品事实", "产品", "服务名称", "功能清单", "能力说明", "交付形态", "业务事实"},
+            {"品牌资产", "品牌名", "商标", "logo", "字体授权", "视觉规范"},
+            {"联系方式", "联系方式", "邮箱", "电话", "地址", "微信", "公众号"},
+            {"价格口径", "价格", "报价", "套餐", "收费"},
+            {"资质", "资质", "认证", "许可证"}
+    };
+
+    static String factTopic(String item) {
+        if (item == null) return null;
+        String s = item.toLowerCase(java.util.Locale.ROOT);
+        for (String[] row : FACT_TOPICS) {
+            for (int i = 1; i < row.length; i++) {
+                if (s.contains(row[i])) return row[0];
+            }
+        }
+        return null;
+    }
+
+    /** 按主题收敛一遍:同类只留信息最全的那条,原有清单也顺带清干净。 */
+    static List<String> compactTopics(List<String> in) {
+        List<String> out = new ArrayList<>();
+        Map<String, Integer> at = new HashMap<>();
+        for (String s : in) {
+            String t = factTopic(s);
+            if (t == null) {
+                out.add(s);
+                continue;
+            }
+            Integer i = at.get(t);
+            if (i == null) {
+                at.put(t, out.size());
+                out.add(s);
+            } else if (s.length() > out.get(i).length()) {
+                out.set(i, s);
+            }
+        }
+        return out;
     }
 
     private List<String> parseNeedsInput(String raw) {
@@ -1334,6 +1443,44 @@ public class CompanyEngineService {
         int l = s.indexOf('{');
         int r = s.lastIndexOf('}');
         return (l >= 0 && r > l) ? s.substring(l, r + 1) : "{}";
+    }
+
+    /**
+     * 兜底修复:把坏掉的输出原样丢回给模型,让它自己改成严格 JSON。
+     * 比让创始人在页面上重下一次目标便宜得多,也比在本地写一个"什么坏法都能修"的解析器现实。
+     * 失败就返回空串,由调用方给出可读的错误。
+     */
+    private String repairJson(String broken, String model, Long goalId, String schema) {
+        String sys = "你是 JSON 修复器。只输出一个严格合法的 JSON 对象:不要 Markdown 代码块,不要解释,不要客套话。";
+        String user = "下面这段内容本应是一个 JSON 对象,但格式坏了(可能被截断、混进了中文标点、缺右括号)。\n"
+                + "请在保持原意的前提下补全并改正它:\n"
+                + "1. 只输出修复后的 JSON,以 { 开头、以 } 结尾;\n"
+                + "2. 键名与字符串值一律用英文半角双引号,键名不许改;\n"
+                + "3. 被截断的部分按原意补完,但每条描述压到 80 字以内,确保一次能写完;\n"
+                + "4. 必须有的字段:" + schema + "\n\n原内容:\n" + clip(broken, 12000);
+        try {
+            String fixed = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                    model, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
+            tokenRepo.save(new TokenLog(null, goalId, "JSON_REPAIR",
+                    CeoLoopService.estimateTokens(sys.length() + user.length() + fixed.length()), model));
+            return fixed;
+        } catch (Exception e) {
+            log.warn("JSON 自动修复调用失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** 解析失败的原始输出留一份在盘上,事后能看清楚到底坏在哪,而不是只凭日志里的 300 字猜。 */
+    private void dumpRaw(String kind, Long id, String raw) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(dataDir, "diagnose");
+            java.nio.file.Files.createDirectories(dir);
+            String name = kind + "-" + id + "-" + Instant.now().toEpochMilli() + ".txt";
+            java.nio.file.Files.writeString(dir.resolve(name), raw == null ? "" : raw,
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            // 诊断信息写不下去不影响主流程
+        }
     }
 
     public static Instant parseInstant(String s) {

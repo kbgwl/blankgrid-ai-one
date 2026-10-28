@@ -246,6 +246,9 @@ public class TaskService {
             // 记账要记清是哪个模型烧的:不同模型差十倍价,只记 token 数算不出钱
             String usedModel = (task.getModel() != null && !task.getModel().isBlank())
                     ? task.getModel() : settings.defaultModel();
+            // 评审任务要的是结构化结论(score/pass/notes) —— 服务端直接强制 JSON 输出,
+            // 免得评审员写成一段散文,引擎解析不到分数只能判 0 分反复返工。
+            boolean jsonTask = Task.KIND_REVIEW.equals(task.getKind());
             String result = llm.chatStream(messages, task.getModel(), delta -> {
                 if (cancelled.contains(taskId)) throw new TaskCancelledException();
                 sb.append(delta);
@@ -253,7 +256,7 @@ public class TaskService {
                 p.put("taskId", taskId);
                 p.put("delta", delta);
                 pusher.push("task-delta", p);
-            });
+            }, null, jsonTask, jsonTask ? 4000 : 0);
 
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
                     CeoLoopService.estimateTokens(promptChars + result.length()),
