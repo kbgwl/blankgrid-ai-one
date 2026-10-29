@@ -66,24 +66,29 @@ public class EcomSearchTool implements AiTool {
     @Override
     public String description() {
         return """
-                在京东和淘宝按关键词搜索商品,返回真实到手价(券后价)、30 天销量、店铺名和购买链接。
+                在京东和淘宝查商品真实到手价(券后价)、30 天销量、店铺性质和购买链接。
                 凡是涉及价格、销量、规格、比价的活,必须先用这个工具查,不要凭记忆报价。
-                参数:keyword(必填,商品名,尽量带规格如"A4打印纸 70g 500张");platforms(默认 jd,tb 两个都查);
-                limit(每个平台返回几条,默认 6);maxPrice(只要这个价格以下的,可选);
-                sort(price=价格从低到高,默认;sales=销量从高到低)。
-                返回结果已按到手价升序排好,可以直接用来做采购比价单。""";
+                两种用法:
+                1) 关键词搜索:传 keyword,适合"先看看市面上有什么、什么价"。
+                2) 精准核价:传 skuIds(京东商品编号)或 itemIds(淘宝商品 id),返回的就是那一个确定型号的价格。
+                   已知具体商品链接时用这个 —— 关键词搜出来的标题是模糊匹配,同代不同容量/颜色会混在一起。
+                参数:keyword 与 skuIds/itemIds 至少给一个;platforms 默认 jd,tb 都查;
+                limit 每个平台返回几条(默认 6);maxPrice 价格上限;sort(price 价格升序,默认 / sales 销量降序)。
+                返回结果按到手价升序排好,非全新/非国行/合约机等风险款已自动标 ⚠ 并排到最后。""";
     }
 
     @Override
     public String paramsSchema() {
         return """
                 {"type":"object","properties":{
-                  "keyword":{"type":"string","description":"搜索关键词,建议带规格与型号,越具体越准"},
+                  "keyword":{"type":"string","description":"搜索关键词,建议带完整型号与规格,如 iPhone 17 Pro 256G 国行"},
+                  "skuIds":{"type":"string","description":"京东商品编号(skuId),逗号分隔。精准核价用,给了就走商品详情接口"},
+                  "itemIds":{"type":"string","description":"淘宝商品 id(num_iid),逗号分隔。精准核价用"},
                   "platforms":{"type":"string","description":"平台,逗号分隔:jd,tb。默认两个都查"},
                   "limit":{"type":"integer","description":"每个平台返回条数,默认 6,最多 20"},
                   "maxPrice":{"type":"number","description":"只要到手价不高于此值的结果"},
                   "sort":{"type":"string","enum":["price","sales"],"description":"排序:price 价格升序(默认),sales 销量降序"}
-                },"required":["keyword"]}""";
+                }}""";
     }
 
     @Override
@@ -103,13 +108,62 @@ public class EcomSearchTool implements AiTool {
                 + "(京东还要推广位 PID 才能生成购买链接),填完这里就会自动可用。";
     }
 
+    /**
+     * 标题里出现这些词,基本等于「不是你以为的那个商品」。
+     *
+     * <p>采购场景最贵的错误不是买贵,是买错:10 部港版 iPhone 发下去,激活了不能退,
+     * 无官方保修,报销还卡发票。这些词在标题里都是明写的,机器一眼能挑出来,
+     * 靠人一条条看 20 个商品标题反而会漏。
+     */
+    private static final String[][] RISK_WORDS = {
+            {"港版", "美版", "日版", "韩版", "欧版", "亚太版", "海外版", "国际版", "水货", "外版", "非国行", "美行", "港行"},
+            {"官换", "官翻", "翻新", "二手", "拆封", "开封机", "99新", "95新", "9成新", "展示机", "样机", "演示机", "资源机", "BS机", "组装机"},
+            {"合约机", "有锁", "卡贴", "运营商定制", "合约套餐", "绑定套餐"},
+            {"山寨", "高仿", "精仿", "华强北", "原装拆机", "配件机", "无包装"},
+    };
+
+    private static final String[] RISK_LEVELS = {"非国行(国内无官方保修)", "非全新机", "合约/有锁机", "疑似山寨或拼装"};
+
+    /** 命中返回风险说明,没命中返回空串。标题里的字面词,不需要模型判断。 */
+    static String detectRisk(String title) {
+        if (title == null || title.isBlank()) return "";
+        for (int i = 0; i < RISK_WORDS.length; i++) {
+            for (String w : RISK_WORDS[i]) {
+                if (title.contains(w)) return RISK_LEVELS[i] + ":" + w;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * 店铺性质。企业采购真正卡人的是这两个字:发票。
+     * 自营/旗舰店能开专票、售后走平台;第三方小店往往只能开普票,出问题扯皮。
+     */
+    static String shopTag(String platform, String shop, boolean tmall) {
+        if (shop == null || shop.isBlank()) return "";
+        if ("京东".equals(platform)) {
+            if (shop.contains("自营")) return "自营(可开专票)";
+            if (shop.contains("旗舰店")) return "旗舰店";
+            if (shop.contains("专营店") || shop.contains("专卖店")) return "专卖店";
+            return "第三方店(发票/售后由商家承担)";
+        }
+        if (tmall || shop.contains("天猫")) return "天猫";
+        if (shop.contains("旗舰店")) return "旗舰店";
+        if (shop.contains("专营店") || shop.contains("专卖店")) return "专卖店";
+        return "淘宝C店(多为普票,慎选)";
+    }
+
     /** 归一化后的一个商品。两个平台的字段名完全不一样,先统一再排序。 */
     private record Item(String platform, String title, BigDecimal finalPrice, BigDecimal originalPrice,
                         String couponText, int sales30d, String shop, String url, String skuId,
-                        BigDecimal commissionRate) {
+                        BigDecimal commissionRate, String risk, boolean tmall) {
         /** 到手价排序用的键;null 视为最贵,排最后 */
         BigDecimal sortKey() {
             return finalPrice == null ? new BigDecimal("99999999") : finalPrice;
+        }
+
+        boolean risky() {
+            return risk != null && !risk.isBlank();
         }
     }
 
@@ -117,8 +171,12 @@ public class EcomSearchTool implements AiTool {
     public String execute(String argsJson, ToolContext ctx) throws Exception {
         JsonNode args = (argsJson == null || argsJson.isBlank()) ? mapper.createObjectNode() : mapper.readTree(argsJson);
         String keyword = args.path("keyword").asText("").trim();
-        if (keyword.isEmpty()) {
-            return "缺少 keyword 参数。请说明要搜什么商品,例如 {\"keyword\":\"A4打印纸 70g\"}。";
+        String skuIds = args.path("skuIds").asText("").trim();
+        String itemIds = args.path("itemIds").asText("").trim();
+        boolean precise = !skuIds.isEmpty() || !itemIds.isEmpty();
+        if (keyword.isEmpty() && !precise) {
+            return "缺少 keyword 参数。请说明要查什么商品,例如 {\"keyword\":\"A4打印纸 70g\"};"
+                    + "如果已知具体商品,也可以直接传 skuIds(京东)/ itemIds(淘宝) 做精准核价。";
         }
         String platforms = args.path("platforms").asText("jd,tb").toLowerCase(Locale.ROOT);
         int limit = Math.min(20, Math.max(1, args.path("limit").asInt(6)));
@@ -134,12 +192,18 @@ public class EcomSearchTool implements AiTool {
             return "两家都没配好密钥,查不了。" + unavailableReason();
         }
 
+        String jdKeyword = keyword;
+        String tbKeyword = keyword;
         // 两家接口互不依赖,并行查 —— 串行会让一次比价等足两个网络往返
         CompletableFuture<List<Item>> jdF = wantJd
-                ? CompletableFuture.supplyAsync(() -> safeSearch("京东", () -> searchJd(keyword, limit, bySales, e)))
+                ? CompletableFuture.supplyAsync(() -> safeSearch("京东", () -> skuIds.isEmpty()
+                        ? searchJd(jdKeyword, limit, bySales, e)
+                        : searchJdBySku(skuIds, limit, e)))
                 : CompletableFuture.completedFuture(List.of());
         CompletableFuture<List<Item>> tbF = wantTb
-                ? CompletableFuture.supplyAsync(() -> safeSearch("淘宝", () -> searchTb(keyword, limit, bySales, e)))
+                ? CompletableFuture.supplyAsync(() -> safeSearch("淘宝", () -> itemIds.isEmpty()
+                        ? searchTb(tbKeyword, limit, bySales, e)
+                        : searchTbByItem(itemIds, limit, e)))
                 : CompletableFuture.completedFuture(List.of());
 
         List<Item> all = new ArrayList<>();
@@ -151,16 +215,22 @@ public class EcomSearchTool implements AiTool {
             all.removeIf(i -> i.finalPrice() == null || i.finalPrice().compareTo(cap) > 0);
         }
         if (all.isEmpty()) {
-            return "「" + keyword + "」在" + (wantJd ? "京东" : "") + (wantJd && wantTb ? "、" : "")
+            String what = !keyword.isEmpty() ? "「" + keyword + "」" : "这些商品编号";
+            return what + "在" + (wantJd ? "京东" : "") + (wantJd && wantTb ? "、" : "")
                     + (wantTb ? "淘宝" : "") + "没有查到符合条件的商品。"
-                    + (maxPrice != null ? "可能是价格上限设得太低,可以放宽到 " + maxPrice.multiply(new BigDecimal("1.5")).setScale(0, RoundingMode.HALF_UP) + " 再试。" : "建议换个更通用的关键词(去掉型号、颜色、包装数)。");
+                    + (maxPrice != null ? "可能是价格上限设得太低,可以放宽到 " + maxPrice.multiply(new BigDecimal("1.5")).setScale(0, RoundingMode.HALF_UP) + " 再试。" : "建议换个更通用的关键词(去掉型号、颜色、包装数)。")
+                    + (precise ? "另外检查一下 skuIds/itemIds 是否与平台对应(京东编号和淘宝 id 不通用)。" : "");
         }
 
-        all.sort(bySales
+        // 先按价格/销量排,风险款稳定地挪到最后。
+        // 不剔除是为了让人看见"便宜 2000 的那款是什么" —— 直接藏掉反而会被问"为什么没查到这个价"。
+        Comparator<Item> key = bySales
                 ? Comparator.comparingInt(Item::sales30d).reversed()
-                : Comparator.comparing(Item::sortKey));
+                : Comparator.comparing(Item::sortKey);
+        all.sort(Comparator.comparing(Item::risky).thenComparing(key));
 
-        return render(keyword, all, wantJd, wantTb, bySales);
+        return render(keyword.isEmpty() ? "精准核价 " + (skuIds.isEmpty() ? itemIds : skuIds) : keyword,
+                all, wantJd, wantTb, bySales);
     }
 
     /** 单个平台失败不能把整个比价拖垮:另一家的数据照样有用。 */
@@ -190,10 +260,44 @@ public class EcomSearchTool implements AiTool {
         }
         Map<String, Object> biz = new LinkedHashMap<>();
         biz.put("goodsReq", goodsReq);
+        return parseJdData(jdCall("jd.union.open.goods.jingfen.query", biz, e));
+    }
+
+    /**
+     * 按 skuId 精准查。区别在于:京粉精选只覆盖"已进推广池"的商品,
+     * 而商品详情查询是按编号点名要,型号、规格、价格都不会串。
+     * 拿到具体商品链接后想确认"就是这个型号多少钱",走这条路。
+     */
+    private List<Item> searchJdBySku(String skuIds, int limit, SettingsService.Ecom e) throws Exception {
+        List<Object> ids = new ArrayList<>();
+        for (String s : skuIds.split("[,，\\s]+")) {
+            String t = s.trim();
+            if (t.isEmpty()) continue;
+            try {
+                ids.add(Long.parseLong(t));
+            } catch (NumberFormatException ex) {
+                // 有人会把整条链接塞进来,顺手把数字抠出来
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{6,})").matcher(t);
+                if (m.find()) ids.add(Long.parseLong(m.group(1)));
+            }
+            if (ids.size() >= Math.min(limit, 20)) break;
+        }
+        if (ids.isEmpty()) throw new IllegalStateException("skuIds 里没有合法的京东商品编号(应是纯数字,如 100011)");
+        Map<String, Object> goodsReq = new LinkedHashMap<>();
+        goodsReq.put("skuIds", ids);
+        goodsReq.put("pageIndex", 1);
+        goodsReq.put("pageSize", ids.size());
+        Map<String, Object> biz = new LinkedHashMap<>();
+        biz.put("goodsReqDTO", goodsReq);
+        return parseJdData(jdCall("jd.union.open.goods.query", biz, e));
+    }
+
+    /** 京东联盟调用:签名、网关、业务错误识别都在这里,两个查询方法共用。 */
+    private JsonNode jdCall(String method, Map<String, Object> biz, SettingsService.Ecom e) throws Exception {
         String bizJson = mapper.writeValueAsString(biz);
 
         TreeMap<String, String> p = new TreeMap<>();
-        p.put("method", "jd.union.open.goods.jingfen.query");
+        p.put("method", method);
         p.put("app_key", e.jdAppKey.trim());
         p.put("timestamp", ZonedDateTime.now(CST).format(TS));
         p.put("format", "json");
@@ -223,29 +327,40 @@ public class EcomSearchTool implements AiTool {
             throw new IllegalStateException("京东联盟报错:" + clip(msg, 160)
                     + "(常见原因:AppKey 未申请商品查询权限、签名错、IP 未加白)");
         }
+        return extractJdPayload(root);
+    }
 
-        // result 是个 JSON 字符串,要再解一次。key 可能是 _response 也可能是 _responce(官方拼写就这样)
-        JsonNode payload = null;
+    /**
+     * 从响应里挖出真正的结果对象。
+     *
+     * <p>要点:外层 key 是方法名派生的(如 jd_union_open_goods_jingfen_query_response),
+     * 且官方历史上把 response 拼成过 responce;result 里有时是 JSON 字符串要再解一层。
+     */
+    private JsonNode extractJdPayload(JsonNode root) throws Exception {
         Iterator<String> names = root.fieldNames();
         while (names.hasNext()) {
             String k = names.next();
-            if (k.startsWith("jd_union_open_goods_jingfen") && k.endsWith("response")) {
+            if (k.startsWith("jd_union_open_goods_") && (k.endsWith("response") || k.endsWith("responce"))) {
                 JsonNode wrapper = root.path(k);
                 String inner = wrapper.path("result").asText("");
-                payload = inner.isEmpty() ? wrapper : mapper.readTree(inner);
-                break;
+                return inner.isEmpty() ? wrapper : mapper.readTree(inner);
             }
         }
-        if (payload == null) {
-            JsonNode g = root.path("jd_union_open_goods_jingfen_query_responce").path("result");
-            String inner = g.asText("");
-            payload = inner.isEmpty() ? root : mapper.readTree(inner);
+        // 兜底:不认 key 名就找任意第一个带 result 的节点,别再写死一个拼错的 key
+        names = root.fieldNames();
+        while (names.hasNext()) {
+            JsonNode wrapper = root.path(names.next());
+            String inner = wrapper.path("result").asText("");
+            if (!inner.isEmpty()) return mapper.readTree(inner);
         }
+        return root;
+    }
+
+    private List<Item> parseJdData(JsonNode payload) {
         if (payload.has("code") && payload.path("code").asInt(200) != 200) {
             throw new IllegalStateException("京东联盟返回码 " + payload.path("code").asInt()
                     + ":" + clip(payload.path("message").asText(""), 160));
         }
-
         List<Item> out = new ArrayList<>();
         JsonNode data = payload.path("data");
         if (data.isArray()) {
@@ -269,7 +384,8 @@ public class EcomSearchTool implements AiTool {
                 String couponText = (coupon != null && coupon.compareTo(BigDecimal.ZERO) > 0)
                         ? "券 ¥" + coupon.stripTrailingZeros().toPlainString() : "";
                 out.add(new Item("京东", title, finalPrice, original, couponText, sales, shop, url,
-                        n.path("skuId").asText(""), dec(n.path("commissionInfo").path("commissionShare").asText(""))));
+                        n.path("skuId").asText(""), dec(n.path("commissionInfo").path("commissionShare").asText("")),
+                        detectRisk(title), false));
             }
         }
         return out;
@@ -280,11 +396,6 @@ public class EcomSearchTool implements AiTool {
     private List<Item> searchTb(String keyword, int limit, boolean bySales, SettingsService.Ecom e) throws Exception {
         TreeMap<String, String> p = new TreeMap<>();
         p.put("method", "taobao.tbk.dg.material.optional");
-        p.put("app_key", e.tbAppKey.trim());
-        p.put("timestamp", ZonedDateTime.now(CST).format(TS));
-        p.put("format", "json");
-        p.put("v", "2.0");
-        p.put("sign_method", "md5");
         p.put("q", keyword);
         p.put("adzone_id", e.tbAdzoneId.trim());
         p.put("page_no", "1");
@@ -292,28 +403,8 @@ public class EcomSearchTool implements AiTool {
         // 采购场景：只看得见有券的，基本等于只看真实优惠价
         if (!Boolean.FALSE.equals(e.couponOnly)) p.put("has_coupon", "true");
         p.put("sort", bySales ? "tk_total_sales_des" : "price_asc");
-        p.put("sign", md5Sign(p, e.tbAppSecret.trim()));
 
-        String gateway = (e.tbGateway == null || e.tbGateway.isBlank()) ? TB_GATEWAY : e.tbGateway.trim();
-        String url = gateway + "?" + formEncode(p);
-        HttpRequest req = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(20))
-                .GET()
-                .build();
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) {
-            throw new IllegalStateException("淘宝返回 HTTP " + resp.statusCode() + ":" + clip(resp.body(), 200));
-        }
-        JsonNode root = mapper.readTree(resp.body());
-
-        JsonNode err = root.path("error_response");
-        if (!err.isMissingNode() && !err.isNull() && err.isObject()) {
-            String msg = err.path("sub_msg").asText(err.path("msg").asText(""));
-            throw new IllegalStateException("淘宝客报错:" + clip(msg, 160)
-                    + "(常见原因:应用未备案、adzone_id 与 AppKey 不匹配、权限包未申请)");
-        }
-
+        JsonNode root = tbCall(p, e);
         JsonNode block = root.path("tbk_dg_material_optional_response");
         JsonNode list = block.path("result_list").path("map_data");
         List<Item> out = new ArrayList<>();
@@ -330,7 +421,8 @@ public class EcomSearchTool implements AiTool {
             String couponInfo = n.path("coupon_info").asText("");
             String shop = n.path("shop_title").asText("");
             // user_type: 0 集市店, 1 天猫 —— 采购时天猫通常更看重发票与售后
-            if (n.path("user_type").asInt(0) == 1 && !shop.contains("天猫")) shop = shop + "(天猫)";
+            boolean tmall = n.path("user_type").asInt(0) == 1;
+            if (tmall && !shop.contains("天猫")) shop = shop + "(天猫)";
             String itemUrl = n.path("item_url").asText("");
             if (itemUrl.isBlank()) {
                 String id = n.path("item_id").asText("");
@@ -339,9 +431,81 @@ public class EcomSearchTool implements AiTool {
             out.add(new Item("淘宝", title, finalPrice, zk, couponInfo.isBlank() && coupon != null
                     ? "券 ¥" + coupon.stripTrailingZeros().toPlainString(): couponInfo,
                     n.path("volume").asInt(0), shop, itemUrl, n.path("item_id").asText(""),
-                    dec(n.path("commission_rate").asText(""))));
+                    dec(n.path("commission_rate").asText("")), detectRisk(title), tmall));
         }
         return out;
+    }
+
+    /**
+     * 按淘宝商品 id 精准取详情。
+     *
+     * <p>物料搜索返回的价格是 SPU 级的"折扣价",同款不同容量/颜色会混成一个数,
+     * 「256G 多少钱」这种问题它答不准。商品详情接口按 id 点名,型号是确定的。
+     * 代价:它不带券、不带销量 —— 精准核价只认型号和标价,券要人去结算页看。
+     */
+    private List<Item> searchTbByItem(String itemIds, int limit, SettingsService.Ecom e) throws Exception {
+        List<String> ids = new ArrayList<>();
+        for (String s : itemIds.split("[,，\\s]+")) {
+            String t = s.trim();
+            if (t.isEmpty()) continue;
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{6,})").matcher(t);
+            if (m.find()) ids.add(m.group(1));
+            else if (t.matches("\\d+")) ids.add(t);
+            if (ids.size() >= Math.min(limit, 20)) break;
+        }
+        if (ids.isEmpty()) throw new IllegalStateException("itemIds 里没有合法的淘宝商品 id(纯数字)");
+
+        TreeMap<String, String> p = new TreeMap<>();
+        p.put("method", "taobao.tbk.item.info.get");
+        p.put("num_iids", String.join(",", ids));
+        p.put("platform", "2");
+
+        JsonNode root = tbCall(p, e);
+        JsonNode arr = root.path("tbk_item_info_get_response").path("results").path("n_tbk_item");
+        List<Item> out = new ArrayList<>();
+        if (!arr.isArray()) return out;
+        for (JsonNode n : arr) {
+            String title = n.path("title").asText("");
+            if (title.isBlank()) continue;
+            BigDecimal price = dec(n.path("zk_final_price").asText(""));
+            String shop = n.path("shop_title").asText(n.path("nick").asText(""));
+            String id = n.path("num_iid").asText("");
+            String itemUrl = n.path("item_url").asText("");
+            if (itemUrl.isBlank() && !id.isBlank()) itemUrl = "https://item.taobao.com/item.htm?id=" + id;
+            out.add(new Item("淘宝", title, price, price, "", 0, shop, itemUrl, id, null,
+                    detectRisk(title), false));
+        }
+        return out;
+    }
+
+    /** 淘宝客调用:公共参数、签名、错误识别集中在这里。 */
+    private JsonNode tbCall(TreeMap<String, String> p, SettingsService.Ecom e) throws Exception {
+        p.put("app_key", e.tbAppKey.trim());
+        p.put("timestamp", ZonedDateTime.now(CST).format(TS));
+        p.put("format", "json");
+        p.put("v", "2.0");
+        p.put("sign_method", "md5");
+        p.put("sign", md5Sign(p, e.tbAppSecret.trim()));
+
+        String gateway = (e.tbGateway == null || e.tbGateway.isBlank()) ? TB_GATEWAY : e.tbGateway.trim();
+        String url = gateway + "?" + formEncode(p);
+        HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(20))
+                .GET()
+                .build();
+        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new IllegalStateException("淘宝返回 HTTP " + resp.statusCode() + ":" + clip(resp.body(), 200));
+        }
+        JsonNode root = mapper.readTree(resp.body());
+        JsonNode err = root.path("error_response");
+        if (!err.isMissingNode() && !err.isNull() && err.isObject()) {
+            String msg = err.path("sub_msg").asText(err.path("msg").asText(""));
+            throw new IllegalStateException("淘宝客报错:" + clip(msg, 160)
+                    + "(常见原因:应用未备案、adzone_id 与 AppKey 不匹配、权限包未申请)");
+        }
+        return root;
     }
 
     // ==================== 输出 ====================
@@ -354,9 +518,12 @@ public class EcomSearchTool implements AiTool {
      */
     private String render(String keyword, List<Item> items, boolean hasJd, boolean hasTb, boolean bySales) {
         StringBuilder sb = new StringBuilder();
+        int riskyCount = (int) items.stream().filter(Item::risky).count();
         sb.append("【比价结果】「").append(keyword).append("」 共 ").append(items.size()).append(" 条")
           .append(" · 平台:").append(hasJd ? "京东" : "").append(hasJd && hasTb ? "+" : "").append(hasTb ? "淘宝" : "")
-          .append(" · 按").append(bySales ? "30天销量" : "到手价").append("排序\n");
+          .append(" · 按").append(bySales ? "30天销量" : "到手价").append("排序")
+          .append(riskyCount > 0 ? " · 其中 " + riskyCount + " 条带风险标记,已排到最后" : "")
+          .append("\n");
         sb.append("(到手价 = 券后实付,已含平台折扣;不含运费,下单前请在结算页确认)\n\n");
 
         int i = 1;
@@ -372,12 +539,22 @@ public class EcomSearchTool implements AiTool {
             }
             if (it.couponText() != null && !it.couponText().isBlank()) sb.append(" ").append(it.couponText());
             if (it.sales30d() > 0) sb.append(" · 30天销量 ").append(it.sales30d());
+            if (it.risky()) sb.append(" · ⚠ ").append(it.risk());
             sb.append("\n   ").append(it.title());
-            if (!it.shop().isBlank()) sb.append("\n   店铺:").append(it.shop());
+            String tag = shopTag(it.platform(), it.shop(), it.tmall());
+            if (!it.shop().isBlank()) {
+                sb.append("\n   店铺:").append(it.shop());
+                if (!tag.isBlank()) sb.append(" [").append(tag).append("]");
+            }
             if (it.url() != null && !it.url().isBlank()) sb.append("\n   ").append(it.url());
             sb.append("\n");
         }
+
+        // 采购单最后一定要落到「按了这一下之后出问题谁负责」——这是我们唯一不能替人决定的事。
         sb.append("\n提示:销量低但价格明显更低的,可能是小店或无票渠道,采购时要一并说明发票与售后风险。");
+        sb.append("\n提醒:本工具只提供商品信息与链接,不代下单、不代付、不承担售后。");
+        sb.append("退货与保修按平台规则和店铺承诺执行;手机/数码类普遍「激活或拆封后不支持 7 天无理由」,"
+                + "批量采购前先跟商家确认未拆封能否退、能否开专票。");
         return sb.toString();
     }
 
