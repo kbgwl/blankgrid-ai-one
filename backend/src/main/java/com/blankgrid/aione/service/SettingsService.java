@@ -33,6 +33,43 @@ public class SettingsService {
         }
     }
 
+    /**
+     * 电商联盟配置。两家都是 CPS 推广体系:只能查商品、生成带 PID 的购买链接,
+     * 没有下单与支付能力 —— 这是平台协议决定的,不是我们没做。
+     *
+     * <p>密钥和 LLM 的 Key 一样按 AES 加密落盘,内存里才是明文。
+     */
+    public static class Ecom {
+        /** 京东联盟 AppKey / AppSecret(media.jd.com → 开发者管理) */
+        public String jdAppKey = "";
+        public String jdAppSecret = "";
+        /** 淘宝客 AppKey / AppSecret + 推广位 PID(adzone_id,纯数字) */
+        public String tbAppKey = "";
+        public String tbAppSecret = "";
+        public String tbAdzoneId = "";
+        /** 只查有券商品。采购场景基本成立:没券的价格通常不是最优 */
+        public Boolean couponOnly;
+        /** 自定义网关,留空用官方默认 */
+        public String jdGateway = "";
+        public String tbGateway = "";
+
+        public boolean jdReady() {
+            return notBlank(jdAppKey) && notBlank(jdAppSecret);
+        }
+
+        public boolean tbReady() {
+            return notBlank(tbAppKey) && notBlank(tbAppSecret) && notBlank(tbAdzoneId);
+        }
+
+        public boolean anyReady() {
+            return jdReady() || tbReady();
+        }
+
+        private static boolean notBlank(String v) {
+            return v != null && !v.isBlank();
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Settings {
         /** null = 请求没带这个字段(保留原值);空数组 = 明确清空。由 get() 统一补成非 null。 */
@@ -57,6 +94,8 @@ public class SettingsService {
         public String exportDir = "";
         /** 评审通过后自动把成果写进落盘目录。null = 请求没带这个字段(保留原值),取值用 autoExportArtifacts() */
         public Boolean autoExportArtifacts;
+        /** 电商联盟(京东/淘宝客)。null = 老配置没这个字段 */
+        public Ecom ecom;
         /** CEO 决策(巡视拍板 + 目标拆解)专用服务商名;null=未提供,空串=跟随主用 */
         public String decisionProvider;
         /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
@@ -142,16 +181,20 @@ public class SettingsService {
             if (cache.enforceCheap == null) cache.enforceCheap = Boolean.TRUE;
             if (cache.thinkingOff == null) cache.thinkingOff = Boolean.TRUE;
             if (cache.cheapModel == null || cache.cheapModel.isBlank()) cache.cheapModel = DEFAULT_CHEAP_MODEL;
+            if (cache.ecom == null) cache.ecom = new Ecom();
         }
         return cache;
     }
 
     public synchronized Settings save(Settings incoming) {
         Settings current = get();
-        // 密钥为空字符串时保留原值(前端掩码回传时不覆盖)
+        // 密钥为空或掩码时保留原值。
+        // 掩码那两个分支是必须的:GET 返回的是 "********",前端原样 PUT 回来,
+        // 只判 isBlank 的话就会把真实 Key 覆盖成八个星号 —— 表现为"改了个无关设置,
+        // 模型突然全 401",而且看不出是自己把 Key 弄丢的。
         if (incoming.providers != null) {
             for (Provider p : incoming.providers) {
-                if (p.apiKey == null || p.apiKey.isBlank()) {
+                if (p.apiKey == null || p.apiKey.isBlank() || "********".equals(p.apiKey)) {
                     current.providers.stream()
                             .filter(c -> c.name.equals(p.name))
                             .findFirst()
@@ -181,6 +224,26 @@ public class SettingsService {
         if (incoming.enforceCheap != null) current.enforceCheap = incoming.enforceCheap;
         if (incoming.thinkingOff != null) current.thinkingOff = incoming.thinkingOff;
         if (incoming.pdfFontPath != null) current.pdfFontPath = incoming.pdfFontPath.trim();
+        // 电商联盟:secret 同样遵守"空或掩码回传 = 保留原值",否则前端每存一次设置
+        // 就会把已经保存好的 AppSecret 抹成星号,表现为"配置看着在、一调就 403"。
+        if (incoming.ecom != null) {
+            if (current.ecom == null) current.ecom = new Ecom();
+            Ecom in = incoming.ecom;
+            if (in.jdAppKey != null) current.ecom.jdAppKey = in.jdAppKey.trim();
+            if (in.jdAppSecret != null) {
+                if ("__CLEAR__".equals(in.jdAppSecret)) current.ecom.jdAppSecret = "";
+                else if (isRealSecret(in.jdAppSecret)) current.ecom.jdAppSecret = in.jdAppSecret.trim();
+            }
+            if (in.tbAppKey != null) current.ecom.tbAppKey = in.tbAppKey.trim();
+            if (in.tbAppSecret != null) {
+                if ("__CLEAR__".equals(in.tbAppSecret)) current.ecom.tbAppSecret = "";
+                else if (isRealSecret(in.tbAppSecret)) current.ecom.tbAppSecret = in.tbAppSecret.trim();
+            }
+            if (in.tbAdzoneId != null) current.ecom.tbAdzoneId = in.tbAdzoneId.trim();
+            if (in.couponOnly != null) current.ecom.couponOnly = in.couponOnly;
+            if (in.jdGateway != null) current.ecom.jdGateway = in.jdGateway.trim();
+            if (in.tbGateway != null) current.ecom.tbGateway = in.tbGateway.trim();
+        }
         // 口令:空或掩码回传则保留原值;__CLEAR__ 表示清除
         if ("__CLEAR__".equals(incoming.password)) {
             current.password = "";
@@ -202,12 +265,21 @@ public class SettingsService {
             for (Provider p : disk.providers) p.apiKey = box.encrypt(p.apiKey);
         }
         if (disk.password != null) disk.password = box.encrypt(disk.password);
+        if (disk.ecom != null) {
+            disk.ecom.jdAppSecret = box.encrypt(disk.ecom.jdAppSecret);
+            disk.ecom.tbAppSecret = box.encrypt(disk.ecom.tbAppSecret);
+        }
         try {
             Files.createDirectories(file.getParent());
             mapper.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), disk);
         } catch (IOException e) {
             throw new RuntimeException("保存设置失败: " + e.getMessage(), e);
         }
+    }
+
+    /** 前端回传的 secret 是不是真的值(而不是掩码或空)。 */
+    private static boolean isRealSecret(String v) {
+        return v != null && !v.isBlank() && !"********".equals(v);
     }
 
     public Provider primaryProvider() {
@@ -303,6 +375,16 @@ public class SettingsService {
         if (s.password != null && !s.password.isEmpty()) {
             if (!box.isEncrypted(s.password)) plainFound = true;
             s.password = box.decrypt(s.password);
+        }
+        if (s.ecom != null) {
+            if (s.ecom.jdAppSecret != null && !s.ecom.jdAppSecret.isEmpty()) {
+                if (!box.isEncrypted(s.ecom.jdAppSecret)) plainFound = true;
+                s.ecom.jdAppSecret = box.decrypt(s.ecom.jdAppSecret);
+            }
+            if (s.ecom.tbAppSecret != null && !s.ecom.tbAppSecret.isEmpty()) {
+                if (!box.isEncrypted(s.ecom.tbAppSecret)) plainFound = true;
+                s.ecom.tbAppSecret = box.decrypt(s.ecom.tbAppSecret);
+            }
         }
         if (plainFound) {
             try {
@@ -414,6 +496,15 @@ public class SettingsService {
         out.put("providers", providers);
         out.put("apiKeyMasked", true);
         out.put("password", (s.password == null || s.password.isEmpty()) ? "" : "********");
-        return mapper.convertValue(out, Settings.class);
+        Settings maskedSettings = mapper.convertValue(out, Settings.class);
+        if (maskedSettings.ecom != null) {
+            if (maskedSettings.ecom.jdAppSecret != null && !maskedSettings.ecom.jdAppSecret.isEmpty()) {
+                maskedSettings.ecom.jdAppSecret = "********";
+            }
+            if (maskedSettings.ecom.tbAppSecret != null && !maskedSettings.ecom.tbAppSecret.isEmpty()) {
+                maskedSettings.ecom.tbAppSecret = "********";
+            }
+        }
+        return maskedSettings;
     }
 }

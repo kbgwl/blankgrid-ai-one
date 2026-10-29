@@ -207,4 +207,48 @@ class SettingsServiceTest {
         assertFalse(svc.autoExportArtifacts(), "改别的字段不该把落盘开关偷偷打开或关掉");
         assertEquals(90, svc.get().reviewThreshold);
     }
+
+    @Test
+    @DisplayName("把 masked() 的结果原样存回去,真实密钥不能被星号覆盖")
+    void maskedRoundTripKeepsRealKeys() {
+        SettingsService svc = fresh();
+        svc.save(withProviders(provider("主用", "http://x/v1", "sk-real-key", "m", true)));
+
+        // 前端就是这么干的:GET(masked) → 用户改个别的字段 → 整个对象 PUT 回来。
+        // 这里模拟那次 PUT:apiKey 是 "********"。
+        SettingsService.Settings masked = svc.masked();
+        assertEquals("********", masked.providers.get(0).apiKey);
+        svc.save(masked);
+
+        // 真实 Key 必须还在,否则下一次调模型就是 401
+        assertEquals("sk-real-key", svc.get().providers.get(0).apiKey);
+    }
+
+    @Test
+    @DisplayName("电商联盟的 AppSecret 同样遵循掩码不覆盖原值")
+    void ecomSecretNotOverwrittenByMask() {
+        SettingsService svc = fresh();
+        SettingsService.Settings s = new SettingsService.Settings();
+        s.providers = new ArrayList<>(List.of(provider("主用", "http://x/v1", "k", "m", true)));
+        SettingsService.Ecom e = new SettingsService.Ecom();
+        e.jdAppKey = "jdkey";
+        e.jdAppSecret = "jd-secret";
+        e.tbAppKey = "tbkey";
+        e.tbAppSecret = "tb-secret";
+        e.tbAdzoneId = "999";
+        s.ecom = e;
+        svc.save(s);
+
+        SettingsService.Settings masked = svc.masked();
+        assertEquals("********", masked.ecom.jdAppSecret);
+        assertEquals("********", masked.ecom.tbAppSecret);
+        // AppKey 不是秘密,应该照常回显,否则用户看不出自己填的对不对
+        assertEquals("jdkey", masked.ecom.jdAppKey);
+        svc.save(masked);
+
+        assertEquals("jd-secret", svc.get().ecom.jdAppSecret);
+        assertEquals("tb-secret", svc.get().ecom.tbAppSecret);
+        assertEquals("jdkey", svc.get().ecom.jdAppKey);
+    }
+
 }

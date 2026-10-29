@@ -17,14 +17,42 @@ public class SettingsController {
     private final LlmService llmService;
     private final ExportService exportService;
     private final com.blankgrid.aione.service.CompanyEngineService engine;
+    private final com.blankgrid.aione.tool.EcomSearchTool ecomTool;
+    private final com.blankgrid.aione.tool.ToolRegistry toolRegistry;
 
     public SettingsController(SettingsService settingsService, LlmService llmService,
                               ExportService exportService,
-                              com.blankgrid.aione.service.CompanyEngineService engine) {
+                              com.blankgrid.aione.service.CompanyEngineService engine,
+                              com.blankgrid.aione.tool.EcomSearchTool ecomTool,
+                              com.blankgrid.aione.tool.ToolRegistry toolRegistry) {
         this.settingsService = settingsService;
         this.llmService = llmService;
         this.exportService = exportService;
         this.engine = engine;
+        this.ecomTool = ecomTool;
+        this.toolRegistry = toolRegistry;
+    }
+
+    /** 已注册的工具清单及可用状态,设置页用来告诉用户"还差什么才能启用"。 */
+    @GetMapping("/tools")
+    public java.util.List<java.util.Map<String, Object>> tools() {
+        return toolRegistry.describe();
+    }
+
+    /**
+     * 电商联盟连通性自检。真去搜一条,比"保存成功"有用得多 ——
+     * 密钥填错、应用没备案、adzone_id 与 AppKey 不匹配,这些都是保存时不报错、
+     * 一到干活才 403 的坑。
+     */
+    @PostMapping("/ecom/test")
+    public java.util.Map<String, Object> testEcom() {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        long t0 = System.currentTimeMillis();
+        String detail = ecomTool.selfTest();
+        out.put("ok", !detail.contains("失败") && !detail.contains("还没配置"));
+        out.put("detail", detail);
+        out.put("ms", System.currentTimeMillis() - t0);
+        return out;
     }
 
     @GetMapping

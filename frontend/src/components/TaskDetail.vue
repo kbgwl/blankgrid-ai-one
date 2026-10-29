@@ -28,6 +28,11 @@
           <div class="log-role">{{ roleMap[log.role] || log.role }}</div>
           <div class="log-content">{{ log.content }}</div>
         </div>
+        <!-- 调工具时正文是空的,不单独提示的话界面看上去就是卡住了 -->
+        <div v-if="isRunning && toolHint" class="log-item role-tool is-live">
+          <div class="log-role">调用工具</div>
+          <div class="log-content tool-hint"><i class="pulse"></i>{{ toolHint }}</div>
+        </div>
         <div v-if="isRunning" class="log-item role-assistant is-live">
           <div class="log-role">正在书写<span class="caret"></span></div>
           <div class="log-content">{{ stream || '模型已开始思考,第一个字马上落下…' }}</div>
@@ -58,6 +63,14 @@ const show = computed({
 })
 
 const detail = ref(null)
+/** 正在调用的工具提示。模型安静查数据时,界面必须给出反馈,否则看起来像卡死 */
+const toolHint = ref('')
+
+// 后端只发工具名,中文提示在前端做 —— 改文案不用动后端
+const TOOL_LABELS = {
+  ecom_search: '正在查询京东 / 淘宝实时价格…',
+  calc: '正在精确计算…'
+}
 const statusMap = { PENDING: '待处理', RUNNING: '执行中', DONE: '完成', FAILED: '失败', CANCELLED: '已取消' }
 const roleMap = { system: '岗位说明书', user: '指令', assistant: '回复', info: '备注', error: '错误' }
 
@@ -86,6 +99,7 @@ function unwatchLive() {
 watch(() => [props.modelValue, props.taskId], async ([open, id]) => {
   if (!open || !id) { unwatchLive(); return }
   stream.value = ''
+  toolHint.value = ''
   detail.value = await api.taskDetail(id)
   nextTick(scrollLogs)
   unwatchLive()
@@ -93,11 +107,17 @@ watch(() => [props.modelValue, props.taskId], async ([open, id]) => {
     const cur = detail.value?.task?.id
     if (cur == null) return
     if (evt.type === 'task-delta' && String(evt.taskId) === String(cur)) {
+      // 一开口就说明工具调完回来了,提示条要撤
+      toolHint.value = ''
       stream.value += evt.delta || ''
       if (!scrollTimer) scrollTimer = setTimeout(() => { scrollTimer = null; scrollLogs() }, 140)
+    } else if (evt.type === 'task-tool' && String(evt.taskId) === String(cur)) {
+      toolHint.value = TOOL_LABELS[evt.tool] || ('正在调用 ' + evt.tool + ' …')
+      nextTick(scrollLogs)
     } else if (evt.type === 'task-update' && String(evt.task?.id) === String(cur)) {
       api.taskDetail(cur).then(d => {
         stream.value = ''
+        toolHint.value = ''
         detail.value = d
         nextTick(scrollLogs)
       }).catch(() => {})
@@ -133,6 +153,7 @@ async function redispatch() {
 
 async function jump(id) {
   stream.value = ''
+  toolHint.value = ''
   detail.value = await api.taskDetail(id)
   nextTick(scrollLogs)
 }
@@ -167,6 +188,16 @@ async function jump(id) {
   content: ""; position: absolute; left: 0; top: 14%; bottom: 14%; width: 2px; border-radius: 2px;
   background: linear-gradient(180deg, transparent, var(--glow-cyan), transparent); opacity: .65;
 }
+/* 工具调用:单独一种角色。它既不是模型的输出也不是用户输入,
+   用琥珀色和前面两种区分开 —— 一眼能看出"这一步是去外面取数了" */
+.role-tool { border-color: rgba(var(--rgb-warn), .3); background: rgba(var(--rgb-warn), .045); }
+.role-tool .log-role { color: rgba(var(--rgb-warn), .85); }
+.tool-hint { display: flex; align-items: center; gap: 9px; color: rgba(var(--rgb-warn), .9); font-size: 12.5px; }
+.pulse {
+  width: 7px; height: 7px; border-radius: 50%; background: rgba(var(--rgb-warn), .9);
+  animation: toolPulse 1.25s ease-in-out infinite; flex: none;
+}
+@keyframes toolPulse { 0%, 100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }
 .role-error { border-color: rgba(var(--rgb-error), .3); background: rgba(var(--rgb-error), .03); }
 .log-role { font-size: 10px; letter-spacing: .25em; color: var(--text-faint); margin-bottom: 8px; }
 .role-assistant .log-role { color: var(--glow-cyan-dim); }

@@ -32,7 +32,59 @@ public class LlmService {
     public static class ChatMessage {
         public final String role;
         public final String content;
-        public ChatMessage(String role, String content) { this.role = role; this.content = content; }
+        /** assistant 决定调用工具时携带;普通消息为 null */
+        public final List<ToolCall> toolCalls;
+        /** role=tool 时,表示这是哪一次调用的结果 */
+        public final String toolCallId;
+        /** role=tool 时带上工具名,部分服务商要求 */
+        public final String name;
+
+        public ChatMessage(String role, String content) {
+            this(role, content, null, null, null);
+        }
+
+        public ChatMessage(String role, String content, List<ToolCall> toolCalls, String toolCallId, String name) {
+            this.role = role;
+            this.content = content == null ? "" : content;
+            this.toolCalls = toolCalls;
+            this.toolCallId = toolCallId;
+            this.name = name;
+        }
+
+        /** 回填一次工具执行结果 */
+        public static ChatMessage toolResult(String toolCallId, String toolName, String content) {
+            return new ChatMessage("tool", content, null, toolCallId, toolName);
+        }
+    }
+
+    /** 模型要求调用的一次工具。id 由服务商生成,回填结果时必须原样带回。 */
+    public record ToolCall(String id, String name, String arguments) {}
+
+    /** 提供给模型的工具声明。 */
+    public record ToolSpec(String name, String description, String parameters) {}
+
+    /**
+     * 一轮调用的结果。可能是"说完了"(content),也可能是"我要用工具"(toolCalls),
+     * 两者可以同时出现(模型先说一句话再调工具)。
+     */
+    public record Turn(String content, List<ToolCall> toolCalls, String finishReason) {
+        public boolean wantsTools() { return toolCalls != null && !toolCalls.isEmpty(); }
+    }
+
+    /** send 的可选参数。收进一个对象,免得参数列表长到看不清哪个是哪个。 */
+    private static final class Opts {
+        boolean jsonMode;
+        int maxTokens;
+        boolean usageOpts = true;
+        boolean thinkOff;
+        List<ToolSpec> tools;
+
+        Opts copy() {
+            Opts o = new Opts();
+            o.jsonMode = jsonMode; o.maxTokens = maxTokens;
+            o.usageOpts = usageOpts; o.thinkOff = thinkOff; o.tools = tools;
+            return o;
+        }
     }
 
     private final HttpClient http = HttpClient.newBuilder()
@@ -82,6 +134,18 @@ public class LlmService {
      */
     public String chatStream(List<ChatMessage> messages, String model, Consumer<String> onDelta, Provider forced,
                             boolean jsonMode, int maxTokens) {
+        return chatWithTools(messages, model, onDelta, forced, jsonMode, maxTokens, null).content();
+    }
+
+    /**
+     * 带工具的流式对话。
+     *
+     * <p>返回 Turn 而不是 String,是因为"说完了"和"要去调工具"是两种不同的结束方式。
+     * 调用方必须能区分 —— 否则就只能把 tool_calls 当成"模型没返回内容"报错,
+     * 这正是不接工具时那个错误信息的来源。
+     */
+    public Turn chatWithTools(List<ChatMessage> messages, String model, Consumer<String> onDelta,
+                              Provider forced, boolean jsonMode, int maxTokens, List<ToolSpec> tools) {
         Provider p = forced != null ? forced : settings.primaryProvider();
         if (p == null || p.baseUrl == null || p.baseUrl.isBlank()) {
             throw new IllegalStateException("尚未配置大模型 API,请在「设置」中填写服务商信息");
@@ -98,32 +162,71 @@ public class LlmService {
         if (!ModelGuard.norm(want).isEmpty() && ModelGuard.downgraded(want, useModel)) {
             log.info("省钱模式:模型 {} → {}", want, useModel);
         }
-        return send(p, messages, useModel, onDelta, jsonMode, maxTokens, true, settings.thinkingOff(), 2);
+        Opts o = new Opts();
+        o.jsonMode = jsonMode;
+        o.maxTokens = maxTokens;
+        o.thinkOff = settings.thinkingOff();
+        o.tools = (tools == null || tools.isEmpty()) ? null : tools;
+        // 要工具就别同时强制 JSON:两者都在要求"输出结构",同时开容易互相打架。
+        // 带工具的调用本来就靠 tool_calls 传结构,不需要 response_format。
+        if (o.tools != null) o.jsonMode = false;
+        return send(p, messages, useModel, onDelta, o, 2);
     }
 
     /**
-     * @param downgrades 还能降级几次。response_format / max_tokens / stream_options 是 OpenAI 协议的可选扩展,
-     *                   自建网关或老版本服务商可能直接 400。撞上了就把这个参数去掉重发,
-     *                   而不是让整条生产线因为"多传了一个字段"停掉。
+     * @param downgrades 还能降级几次。response_format / max_tokens / stream_options / thinking 都是
+     *                   OpenAI 协议的可选扩展,自建网关或老版本服务商可能直接 400。
+     *                   撞上了就把这个参数去掉重发,而不是让整条生产线因为"多传了一个字段"停掉。
      */
-    private String send(Provider p, List<ChatMessage> messages, String useModel, Consumer<String> onDelta,
-                        boolean jsonMode, int maxTokens, boolean usageOpts, boolean thinkOff, int downgrades) {
+    private Turn send(Provider p, List<ChatMessage> messages, String useModel, Consumer<String> onDelta,
+                      Opts opts, int downgrades) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", useModel);
         body.put("stream", true);
-        if (jsonMode) body.putObject("response_format").put("type", "json_object");
-        if (maxTokens > 0) body.put("max_tokens", maxTokens);
+        if (opts.jsonMode) body.putObject("response_format").put("type", "json_object");
+        if (opts.maxTokens > 0) body.put("max_tokens", opts.maxTokens);
         // DeepSeek 的思考模式默认开着且默认 high:模型先写一大段推理再落笔,这段推理
         // 按输出 token 计价,长任务里能占掉一半以上,还常常把输出上限吃光导致正文为空。
         // 写文案、写方案这类活不需要额外推理,默认关掉,账单立刻掉一个量级。
-        if (thinkOff) body.putObject("thinking").put("type", "disabled");
+        if (opts.thinkOff) body.putObject("thinking").put("type", "disabled");
         // 流式默认不回 usage,得主动要。有了真实用量,成本表才是账而不是估算。
-        if (usageOpts) body.putObject("stream_options").put("include_usage", true);
+        if (opts.usageOpts) body.putObject("stream_options").put("include_usage", true);
+        if (opts.tools != null) {
+            ArrayNode arr = body.putArray("tools");
+            for (ToolSpec t : opts.tools) {
+                ObjectNode n = arr.addObject();
+                n.put("type", "function");
+                ObjectNode fn = n.putObject("function");
+                fn.put("name", t.name());
+                fn.put("description", t.description());
+                try {
+                    fn.set("parameters", mapper.readTree(t.parameters()));
+                } catch (IOException e) {
+                    // schema 写坏了退化成"无参数",别让整次请求 400 全废
+                    fn.putObject("parameters").put("type", "object");
+                }
+            }
+        }
         ArrayNode msgs = body.putArray("messages");
         for (ChatMessage m : messages) {
             ObjectNode n = msgs.addObject();
             n.put("role", m.role);
-            n.put("content", m.content);
+            // 带 tool_calls 的 assistant 消息 content 允许为空,但字段必须在,
+            // 缺字段有些网关会直接判协议错误。
+            n.put("content", m.content == null ? "" : m.content);
+            if (m.toolCallId != null && !m.toolCallId.isBlank()) n.put("tool_call_id", m.toolCallId);
+            if (m.name != null && !m.name.isBlank()) n.put("name", m.name);
+            if (m.toolCalls != null && !m.toolCalls.isEmpty()) {
+                ArrayNode tcs = n.putArray("tool_calls");
+                for (ToolCall tc : m.toolCalls) {
+                    ObjectNode o = tcs.addObject();
+                    o.put("id", tc.id());
+                    o.put("type", "function");
+                    ObjectNode f = o.putObject("function");
+                    f.put("name", tc.name());
+                    f.put("arguments", tc.arguments() == null || tc.arguments().isBlank() ? "{}" : tc.arguments());
+                }
+            }
         }
 
         String url = p.baseUrl.replaceAll("/+$", "") + "/chat/completions";
@@ -140,6 +243,9 @@ public class LlmService {
         lastReasoning.set("");
         StringBuilder full = new StringBuilder();
         StringBuilder reasoning = new StringBuilder();
+        // 工具调用在流式里是分片的:第一帧带 id 和 function.name,之后每帧只带 index
+        // 和 arguments 的另一截。必须按 index 归并,否则拼出来永远是残缺的 JSON。
+        java.util.Map<Integer, String[]> callAcc = new java.util.TreeMap<>();
         // 有的服务商流式请求先用 200 开个头,再把错误塞进 data 里(余额不足、限流、模型下线)。
         // 不认这个的话,表现就是"模型未返回内容",查起来完全找不着方向。
         final String[] upstreamError = new String[1];
@@ -150,15 +256,23 @@ public class LlmService {
                 String errBody = resp.body().collect(java.util.stream.Collectors.joining("\n"));
                 if (downgrades > 0 && resp.statusCode() == 400) {
                     String low = errBody.toLowerCase(java.util.Locale.ROOT);
-                    boolean badJson = jsonMode && (low.contains("response_format") || low.contains("json_object")
+                    boolean badJson = opts.jsonMode && (low.contains("response_format") || low.contains("json_object")
                             || low.contains("json mode"));
-                    boolean badMax = maxTokens > 0 && low.contains("max_tokens");
-                    boolean badUsage = usageOpts && (low.contains("stream_options") || low.contains("include_usage"));
-                    boolean badThink = thinkOff && (low.contains("thinking") || low.contains("reasoning"));
-                    if (badJson || badMax || badUsage || badThink) {
+                    boolean badMax = opts.maxTokens > 0 && low.contains("max_tokens");
+                    boolean badUsage = opts.usageOpts && (low.contains("stream_options") || low.contains("include_usage"));
+                    boolean badThink = opts.thinkOff && (low.contains("thinking") || low.contains("reasoning"));
+                    boolean badTools = opts.tools != null && (low.contains("tools") || low.contains("function calling")
+                            || low.contains("tool_choice") || low.contains("不支持工具"));
+                    if (badJson || badMax || badUsage || badThink || badTools) {
                         // 只去掉被顶回来的那个,别把其他的也一起丢了
-                        return send(p, messages, useModel, onDelta, jsonMode && !badJson, badMax ? 0 : maxTokens,
-                                usageOpts && !badUsage, thinkOff && !badThink, downgrades - 1);
+                        Opts next = opts.copy();
+                        if (badJson) next.jsonMode = false;
+                        if (badMax) next.maxTokens = 0;
+                        if (badUsage) next.usageOpts = false;
+                        if (badThink) next.thinkOff = false;
+                        if (badTools) next.tools = null;
+                        log.info("服务商不支持某个可选字段,去掉后重发:{}", low.length() > 120 ? low.substring(0, 120) : low);
+                        return send(p, messages, useModel, onDelta, next, downgrades - 1);
                     }
                 }
                 throw new IllegalStateException("API 返回 " + resp.statusCode() + ": " + truncate(errBody, 500));
@@ -194,6 +308,22 @@ public class LlmService {
                     // 表现就是"跑了两分钟、烧了钱、正文是空的",看起来像模型坏了。
                     JsonNode think = choice.path("delta").path("reasoning_content");
                     if (!think.isMissingNode() && !think.isNull()) reasoning.append(think.asText());
+                    // 工具调用分片归并
+                    JsonNode tcs = choice.path("delta").path("tool_calls");
+                    if (tcs.isArray()) {
+                        for (JsonNode tc : tcs) {
+                            int idx = tc.path("index").asInt(callAcc.size());
+                            String[] slot = callAcc.computeIfAbsent(idx, k -> new String[]{"", "", ""});
+                            String id = tc.path("id").asText("");
+                            if (!id.isEmpty()) slot[0] = id;
+                            String fnName = tc.path("function").path("name").asText("");
+                            if (!fnName.isEmpty()) slot[1] = fnName;
+                            JsonNode a = tc.path("function").path("arguments");
+                            // 规范里 arguments 是字符串片段;有的服务商直接给对象,一并兜住
+                            if (a.isTextual()) slot[2] = slot[2] + a.asText();
+                            else if (!a.isMissingNode() && !a.isNull()) slot[2] = slot[2] + a.toString();
+                        }
+                    }
                 } catch (IOException ignored) {
                     // 跳过无法解析的行
                 }
@@ -205,15 +335,28 @@ public class LlmService {
             throw new IllegalStateException("连接大模型 API 失败: " + e.getMessage(), e);
         }
         lastReasoning.set(truncate(reasoning.toString(), 4000));
-        lastCall = Map.of(
-                "model", useModel,
-                "wanted", wantedModel.get(),
-                "downgraded", ModelGuard.downgraded(wantedModel.get(), useModel),
-                "promptTokens", lastUsage.get()[0],
-                "completionTokens", lastUsage.get()[1],
-                "thinkingChars", reasoning.length(),
-                "finishReason", lastFinishReason.get());
-        if (full.isEmpty()) {
+
+        List<ToolCall> calls = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, String[]> e : callAcc.entrySet()) {
+            String[] v = e.getValue();
+            if (v[1] == null || v[1].isBlank()) continue;
+            String id = (v[0] == null || v[0].isBlank()) ? "call_" + e.getKey() + "_" + System.nanoTime() : v[0];
+            calls.add(new ToolCall(id, v[1], v[2] == null || v[2].isBlank() ? "{}" : v[2]));
+        }
+
+        Map<String, Object> snapshot = new java.util.LinkedHashMap<>();
+        snapshot.put("model", useModel);
+        snapshot.put("wanted", wantedModel.get());
+        snapshot.put("downgraded", ModelGuard.downgraded(wantedModel.get(), useModel));
+        snapshot.put("promptTokens", lastUsage.get()[0]);
+        snapshot.put("completionTokens", lastUsage.get()[1]);
+        snapshot.put("thinkingChars", reasoning.length());
+        snapshot.put("finishReason", lastFinishReason.get());
+        snapshot.put("toolCalls", calls.size());
+        lastCall = snapshot;
+
+        // 只调工具、不写字是合法的:这时候正文为空不代表出错
+        if (full.isEmpty() && calls.isEmpty()) {
             if (upstreamError[0] != null) throw new IllegalStateException("API 错误: " + truncate(upstreamError[0], 300));
             if (reasoning.length() > 0) {
                 dump("empty-content", "model=" + useModel + " finish=" + lastFinishReason.get()
@@ -227,7 +370,7 @@ public class LlmService {
                     + " usage=" + lastUsage.get()[0] + "/" + lastUsage.get()[1] + " bytes=0");
             throw new IllegalStateException("模型未返回内容");
         }
-        return full.toString();
+        return new Turn(full.toString(), calls, lastFinishReason.get());
     }
 
     /** 把异常现场落到 data/diagnose/,下次不用靠猜。 */

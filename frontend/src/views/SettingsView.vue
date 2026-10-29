@@ -133,6 +133,70 @@
           <p class="tip">「检测连通」只从浏览器确认网关地址能否访问;「测一次」由后端真发一条最小请求,验证密钥与模型名确实可用,密钥不出本机、不回显。</p>
         </section>
 
+        <!-- ===== 电商联盟 ===== -->
+        <section id="ecom" class="set-card glass" :style="{ '--i': 1 }">
+          <div class="set-card-head">
+            <div>
+              <h3>电商联盟</h3>
+              <p>让 AI 员工能查真实价格 —— 采购比价单里的每个数字,都从这两个接口来。</p>
+            </div>
+            <span class="badge" :class="ecomStatus.jd || ecomStatus.tb ? 'ok' : 'warn'">
+              {{ ecomStatus.jd || ecomStatus.tb ? '已启用' : '未配置' }}
+            </span>
+          </div>
+
+          <div class="ecom-wrap">
+            <div class="ecom-block">
+              <div class="ecom-title">
+                <b>京东联盟</b>
+                <span>media.jd.com → 开发者管理 → 应用管理。个人实名认证即可,不需要京东店铺。</span>
+              </div>
+              <div class="prov-grid">
+                <label class="pf"><span>AppKey</span>
+                  <el-input v-model="form.ecom.jdAppKey" size="small" placeholder="京东联盟 AppKey" />
+                </label>
+                <label class="pf"><span>AppSecret</span>
+                  <el-input v-model="form.ecom.jdAppSecret" size="small" type="password" show-password
+                            placeholder="保存后回显为 ********,留空即保留原值" />
+                </label>
+              </div>
+            </div>
+
+            <div class="ecom-block">
+              <div class="ecom-title">
+                <b>淘宝客</b>
+                <span>阿里妈妈 → 媒体备案 → 淘宝联盟开放平台建应用。adzone_id 是推广位 ID(纯数字),不填拿不到购买链接。</span>
+              </div>
+              <div class="prov-grid">
+                <label class="pf"><span>AppKey</span>
+                  <el-input v-model="form.ecom.tbAppKey" size="small" placeholder="淘宝客 AppKey" />
+                </label>
+                <label class="pf"><span>AppSecret</span>
+                  <el-input v-model="form.ecom.tbAppSecret" size="small" type="password" show-password
+                            placeholder="保存后回显为 ********,留空即保留原值" />
+                </label>
+                <label class="pf"><span>推广位 adzone_id</span>
+                  <el-input v-model="form.ecom.tbAdzoneId" size="small" placeholder="纯数字,如 123456789" />
+                </label>
+                <label class="pf check"><span>只查带券商品</span>
+                  <el-switch v-model="form.ecom.couponOnly" />
+                </label>
+              </div>
+            </div>
+
+            <div class="ecom-test">
+              <el-button size="small" :loading="ecomState.run" @click="testEcom">测试连通</el-button>
+              <span v-if="ecomState.detail" class="ecom-detail" :class="ecomState.ok ? 'ok' : 'err'">{{ ecomState.detail }}</span>
+              <span v-else class="ecom-hint">先去上面保存,再点这里。它会真搜一条"抽纸",验证密钥、权限包、推广位是否都通。</span>
+            </div>
+
+            <div class="ecom-bound">
+              <div class="eb-item"><b>能做的</b>查全网到手价、30 天销量、店铺资质,生成带推广位的购买链接,做出可直接照着下单的比价单(顺带拿返佣)。</div>
+              <div class="eb-item warn"><b>不能做的</b>自动付款。京东联盟与淘宝客是 CPS 推广体系,只给商品数据和推广链接,没有下单与支付接口 —— 这是平台协议划的线,不是没做。付款那一下留在人手里,责任也留在人手里。</div>
+            </div>
+          </div>
+        </section>
+
         <!-- ===== 质量与目标 ===== -->
         <section id="quality" class="set-card glass" :style="{ '--i': 1 }">
           <div class="set-card-head">
@@ -330,10 +394,18 @@ const defaults = {
   enforceCheap: true, cheapModel: 'deepseek-flash', thinkingOff: true,
   exportDir: '', autoExportArtifacts: true,
   // null = 请求里不带这个字段,后端保留原值;用户真改了单价才变成数组
-  pricing: null, pdfFontPath: ''
+  pricing: null, pdfFontPath: '',
+  // 电商联盟。secret 回传空或星号时后端保留原值,所以这里不用特殊处理
+  ecom: {
+    jdAppKey: '', jdAppSecret: '', tbAppKey: '', tbAppSecret: '', tbAdzoneId: '',
+    couponOnly: true, jdGateway: '', tbGateway: ''
+  }
 }
 
 const form = ref({ ...defaults })
+/* 电商联盟:是否已配好密钥、连通性测试结果 */
+const ecomStatus = reactive({ jd: false, tb: false })
+const ecomState = reactive({ run: false, ok: false, detail: '' })
 const base = ref(null)
 const loaded = ref(false)
 const loading = ref(false)
@@ -352,6 +424,7 @@ const probes = reactive({})
 
 const navItems = [
   { id: 'models', label: '模型服务' },
+  { id: 'ecom', label: '电商联盟' },
   { id: 'quality', label: '质量与目标' },
   { id: 'output', label: '成果落盘' },
   { id: 'cost', label: '成本与导出' },
@@ -523,6 +596,27 @@ async function testDecision() {
   }
 }
 
+function refreshEcomStatus() {
+  const e = form.value.ecom || {}
+  ecomStatus.jd = !!(e.jdAppKey && e.jdAppSecret)
+  ecomStatus.tb = !!(e.tbAppKey && e.tbAppSecret && e.tbAdzoneId)
+}
+
+async function testEcom() {
+  ecomState.run = true
+  ecomState.detail = ''
+  try {
+    const r = await api.ecomTest()
+    ecomState.ok = !!r.ok
+    ecomState.detail = r.detail || '(无返回)'
+  } catch (e) {
+    ecomState.ok = false
+    ecomState.detail = e?.message || '请求失败,后端可能没起来'
+  } finally {
+    ecomState.run = false
+  }
+}
+
 function jump(id) {
   activeSection.value = id
   const el = document.getElementById(id)
@@ -547,9 +641,11 @@ async function load() {
   loadError.value = ''
   try {
     const s = await api.settings()
-    // 后端只回它认识的字段,缺的保留默认值而不是把表单清空
-    form.value = { ...defaults, ...s }
+    // 后端只回它认识的字段,缺的保留默认值而不是把表单清空。
+    // ecom 是嵌套对象,展开时要单独深合并一次,否则后端加/减一个子字段就整块丢掉。
+    form.value = { ...defaults, ...s, ecom: { ...defaults.ecom, ...(s.ecom || {}) } }
     snapshot()
+    refreshEcomStatus()
     loaded.value = true
   } catch (e) {
     loadError.value = e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT'
@@ -584,8 +680,9 @@ async function save() {
   saving.value = true
   try {
     const r = await api.saveSettings(form.value)
-    form.value = { ...defaults, ...r }
+    form.value = { ...defaults, ...r, ecom: { ...defaults.ecom, ...(r.ecom || {}) } }
     snapshot()
+    refreshEcomStatus()
     savedFlash.value = true
     setTimeout(() => { savedFlash.value = false }, 1800)
     ElMessage({ message: '已保存', type: 'success', plain: true })
@@ -807,6 +904,29 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .probe-btn:hover:not(:disabled) { color: var(--glow-cyan); border-color: rgba(var(--rgb-glow), .4); }
 .probe-btn:disabled { opacity: .5; cursor: not-allowed; }
 .prov-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+/* ===== 电商联盟 ===== */
+.ecom-wrap { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.ecom-block { border: 1px solid var(--border-hair); border-left: 2px solid rgba(var(--rgb-glow), .4);
+  border-radius: 11px; background: var(--tint-soft); padding: 13px 15px; }
+.ecom-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ecom-title b { font-size: 12.5px; font-weight: 400; letter-spacing: .1em; color: var(--text-moon); }
+.ecom-title span { font-size: 10.5px; letter-spacing: .03em; color: var(--text-faint); flex: 1; min-width: 200px; }
+.ecom-test { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ecom-detail { font-family: var(--font-mono); font-size: 10.5px; white-space: pre-wrap; line-height: 1.7;
+  max-width: 100%; }
+.ecom-detail.ok { color: var(--st-ok); opacity: .85; }
+.ecom-detail.err { color: var(--st-error); }
+.ecom-hint { font-size: 10.5px; color: var(--text-faint); letter-spacing: .03em; }
+/* 能力边界单独一块深色区:这句"不能自动付款"必须显眼,比配置项本身更重要 */
+.ecom-bound { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 720px) { .ecom-bound { grid-template-columns: 1fr; } }
+.eb-item { font-size: 11px; line-height: 1.75; color: var(--text-dim); letter-spacing: .02em;
+  border: 1px solid var(--border-hair); border-radius: 9px; padding: 10px 13px; background: var(--tint-soft); }
+.eb-item b { display: block; margin-bottom: 4px; font-weight: 400; font-size: 10.5px;
+  letter-spacing: .2em; color: var(--st-ok); }
+.eb-item.warn { border-color: rgba(var(--rgb-warn), .28); }
+.eb-item.warn b { color: var(--st-warn, #e8b04b); }
 /* CEO 决策模型槽位:比服务商多一道左侧光边,标明这是决策中枢而不是一条普通配置 */
 .decision-slot {
   position: relative; border: 1px solid var(--border-hair); border-left: 2px solid rgba(var(--rgb-glow), .55);

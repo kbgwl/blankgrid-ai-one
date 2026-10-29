@@ -55,6 +55,10 @@ export const api = {
   settingsModels: (provider) => http.get('/settings/models', {
     params: provider ? { provider } : {}, timeout: 25000
   }).then(r => r.data),
+  // 已注册的工具清单(名字、是否可用、缺什么)。设置页用它告诉用户"还差一步就能用"
+  tools: () => http.get('/settings/tools').then(r => r.data),
+  // 电商联盟连通性:真去搜一条,比"保存成功"有用 —— 密钥错/没备案都是保存时不报错、干活才 403
+  ecomTest: () => http.post('/settings/ecom/test', {}, { timeout: 60000 }).then(r => r.data),
 
   opsFeed: () => http.get('/ops/feed').then(r => r.data),
   setGoal: (content) => http.post('/ops/goal', { content }).then(r => r.data),

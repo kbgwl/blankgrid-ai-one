@@ -7,6 +7,11 @@ import com.blankgrid.aione.repo.EmployeeRepository;
 import com.blankgrid.aione.repo.TaskLogRepository;
 import com.blankgrid.aione.repo.TaskRepository;
 import com.blankgrid.aione.service.LlmService.ChatMessage;
+import com.blankgrid.aione.service.LlmService.ToolCall;
+import com.blankgrid.aione.service.LlmService.ToolSpec;
+import com.blankgrid.aione.service.LlmService.Turn;
+import com.blankgrid.aione.tool.ToolContext;
+import com.blankgrid.aione.tool.ToolRegistry;
 import com.blankgrid.aione.ws.EventPusher;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -41,6 +46,7 @@ public class TaskService {
     private final com.blankgrid.aione.repo.TokenLogRepository tokenRepo;
     private final com.blankgrid.aione.repo.ActivityRepository activityRepo;
     private final ApplicationEventPublisher publisher;
+    private final ToolRegistry tools;
 
     private final Map<Long, ExecutorService> queues = new ConcurrentHashMap<>();
     private final Set<Long> cancelled = ConcurrentHashMap.newKeySet();
@@ -50,7 +56,8 @@ public class TaskService {
                        SettingsService settings, EventPusher pusher,
                        com.blankgrid.aione.repo.TokenLogRepository tokenRepo,
                        com.blankgrid.aione.repo.ActivityRepository activityRepo,
-                       ApplicationEventPublisher publisher) {
+                       ApplicationEventPublisher publisher,
+                       ToolRegistry tools) {
         this.taskRepo = taskRepo;
         this.logRepo = logRepo;
         this.empRepo = empRepo;
@@ -60,6 +67,7 @@ public class TaskService {
         this.tokenRepo = tokenRepo;
         this.activityRepo = activityRepo;
         this.publisher = publisher;
+        this.tools = tools;
     }
 
     /**
@@ -237,6 +245,21 @@ public class TaskService {
             if (emp.getLearnings() != null && !emp.getLearnings().isBlank()) {
                 sys += "\n\n【你自己的经验教训,务必避免重蹈覆辙】\n" + clip(emp.getLearnings(), 700);
             }
+            // 模型即使拿到了工具表,也倾向于"凭记忆作答"—— 尤其训练数据里见过的品类。
+            // 不明确要求它先查,产出里就会出现看着像真的、实则编造的价格和销量,
+            // 而这种错误比写空话危险得多:客户可能真的照着它去下单。
+            List<com.blankgrid.aione.tool.AiTool> usable = tools.usable();
+            if (!usable.isEmpty()) {
+                StringBuilder tip = new StringBuilder("\n\n【你手上的工具】\n");
+                tip.append("你可以调用以下工具获取真实数据,不必只靠已有知识:\n");
+                for (com.blankgrid.aione.tool.AiTool t : usable) {
+                    tip.append("- ").append(t.name()).append(":").append(firstLine(t.description())).append("\n");
+                }
+                tip.append("\n硬性要求:凡涉及**价格、销量、库存、店铺、链接**等外部事实,必须先调用工具查证。")
+                   .append("查不到就如实写「未查到」,并在文中说明建议人工核实 —— 绝对不要编造数字、")
+                   .append("不要用『约』『大概』来掩盖没有数据。客户会拿着这份东西去下单。");
+                sys += tip.toString();
+            }
             messages.add(new ChatMessage("system", sys));
             if (task.getContextText() != null && !task.getContextText().isEmpty()) {
                 // 上游产出全量透传时,一个任务的输入能有几万字,而其中大部分与本次任务无关。
@@ -254,15 +277,19 @@ public class TaskService {
             // 评审任务要的是结构化结论(score/pass/notes) —— 服务端直接强制 JSON 输出,
             // 免得评审员写成一段散文,引擎解析不到分数只能判 0 分反复返工。
             boolean jsonTask = Task.KIND_REVIEW.equals(task.getKind());
-            String result = llm.chatStream(messages, task.getModel(), delta -> {
+            java.util.function.Consumer<String> onDelta = delta -> {
                 if (cancelled.contains(taskId)) throw new TaskCancelledException();
                 sb.append(delta);
                 Map<String, Object> p = new HashMap<>();
                 p.put("taskId", taskId);
                 p.put("delta", delta);
                 pusher.push("task-delta", p);
-            }, null, jsonTask, EXEC_MAX_TOKENS);
-
+            };
+            // 评审员要的是结构化结论,给了工具反而容易让它去查资料、忘了打分。
+            // 只有干活的岗位才配工具。
+            String result = jsonTask
+                    ? llm.chatStream(messages, task.getModel(), onDelta, null, true, EXEC_MAX_TOKENS)
+                    : converse(messages, task, emp, onDelta, taskId);
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
                     llm.tokensUsed(CeoLoopService.estimateTokens(promptChars + result.length())),
                     llm.lastModel()));
@@ -359,6 +386,65 @@ public class TaskService {
         checkCircuit(emp, failedTask);
     }
 
+    /**
+     * 带工具的多轮对话循环。
+     *
+     * <p>这是「AI 员工只会写字」和「AI 员工能干活」的分界线:模型说要查什么,
+     * 我们真的去查,把一手数据塞回上下文,再让它接着写。对模型来说这些数字和它自己
+     * 编出来的没有区别 —— 但对客户来说,一个是空的,一个是能直接拿去下单的。
+     */
+    private String converse(List<ChatMessage> messages, Task task, Employee emp,
+                            java.util.function.Consumer<String> onDelta, Long taskId) {
+        List<ToolSpec> specs = new ArrayList<>();
+        for (com.blankgrid.aione.tool.AiTool t : tools.usable()) {
+            specs.add(new ToolSpec(t.name(), t.description(), t.paramsSchema()));
+        }
+        // 一个工具都没配(新装的库、或密钥还没填):退回纯文本,别白发一段空工具声明
+        if (specs.isEmpty()) {
+            return llm.chatStream(messages, task.getModel(), onDelta, null, false, EXEC_MAX_TOKENS);
+        }
+
+        for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
+            Turn turn = llm.chatWithTools(messages, task.getModel(), onDelta, null, false, EXEC_MAX_TOKENS, specs);
+            if (!turn.wantsTools()) {
+                return turn.content();
+            }
+            // 模型要调工具:先把"我想调"这句记进历史。少这一步,下一轮它看不懂
+            // 那条 tool 消息是在回应谁,会重新问一遍同样的问题。
+            messages.add(new ChatMessage("assistant", turn.content(), turn.toolCalls(), null, null));
+
+            for (ToolCall tc : turn.toolCalls()) {
+                if (cancelled.contains(taskId)) throw new TaskCancelledException();
+                pushToolCall(taskId, tc.name());
+                String out = tools.invoke(tc.name(), tc.arguments(),
+                        new ToolContext(task.getGoalId(), taskId, emp.getName()));
+                messages.add(ChatMessage.toolResult(tc.id(), tc.name(), out));
+                // 工具调用写进任务日志:出了问题要能回答"这个数字是哪来的"
+                logRepo.save(new TaskLog(task, "info",
+                        "调用 " + tc.name() + " → " + clip(out.replace('\n', ' '), 160)));
+            }
+
+            if (round == MAX_TOOL_ROUNDS) {
+                // 最后一轮撤掉工具表:手里没工具,它就只能基于已查到的材料组织结论。
+                // 留着工具还在,模型会继续搜,永远不交卷。
+                messages.add(new ChatMessage("user",
+                        "工具调用轮次已到上限,不要再查了。请直接基于上面已经拿到的数据给出最终成果;"
+                                + "确实缺的数据在文中注明「未查到」,不要编造。")); 
+                Turn last = llm.chatWithTools(messages, task.getModel(), onDelta, null, false, EXEC_MAX_TOKENS, null);
+                return last.content();
+            }
+        }
+        return "";
+    }
+
+    /** 告诉前端"它正在查什么"。模型安静调工具时界面不能看上去像卡死。 */
+    private void pushToolCall(Long taskId, String toolName) {
+        Map<String, Object> p = new HashMap<>();
+        p.put("taskId", taskId);
+        p.put("tool", toolName);
+        pusher.push("task-tool", p);
+    }
+
     /** 连续失败熔断:同岗位连续 3 次失败自动叫停,上报创始人 */
     private void checkCircuit(Employee emp, Task failedTask) {
         try {
@@ -404,6 +490,15 @@ public class TaskService {
     /** 单次任务的输出上限。不传的话服务商默认常是 4K,长文案写到一半就断,返工一次等于双倍花钱。 */
     static final int EXEC_MAX_TOKENS = 8000;
 
+    /**
+     * 一次任务最多让模型调几轮工具。
+     *
+     * <p>比价这类活一两轮就够(搜一次、看一眼结果)。设这个上限不是为了限功能,
+     * 是为了防死循环:模型可能反复用同一个关键词搜索,每轮都在烧 token 却毫无进展。
+     * 到顶就撤掉工具表逼它交卷,拿到半成品也比无限烧下去强。
+     */
+    static final int MAX_TOOL_ROUNDS = 5;
+
     private static String clip(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "…";
@@ -420,6 +515,14 @@ public class TaskService {
             if (t.getCreatedAt() != null && t.getCreatedAt().isAfter(since)) return true;
         }
         return false;
+    }
+
+    /** 取一段说明的第一句,塞进系统提示时不占太多篇幅。 */
+    private static String firstLine(String s) {
+        if (s == null || s.isBlank()) return "";
+        int cut = s.indexOf('\n');
+        String one = cut > 0 ? s.substring(0, cut) : s;
+        return one.length() > 120 ? one.substring(0, 120) + "…" : one;
     }
 
     /** 超长文本保留头尾各一半,中间标记省略 —— 比只截前面更不容易丢掉结论。 */
