@@ -17,6 +17,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -226,18 +227,22 @@ public class TaskService {
         try {
             List<ChatMessage> messages = new ArrayList<>();
             String sys = emp.getSystemPrompt() == null ? "" : emp.getSystemPrompt();
+            // 知识库会随复盘不断变长,全文塞进每次调用等于给每个任务加一笔固定开销。
+            // 900 字够放下全部"经验教训"要点,再长就是重复和寒暄。
             String kb = settings.get().knowledgeBase;
             if (kb != null && !kb.isBlank()) {
-                sys += "\n\n【公司知识库】\n" + kb;
+                sys += "\n\n【公司知识库】\n" + clip(kb, 900);
             }
             // 岗位自己的经验教训(复盘沉淀),放在最后、最近优先
             if (emp.getLearnings() != null && !emp.getLearnings().isBlank()) {
-                sys += "\n\n【你自己的经验教训,务必避免重蹈覆辙】\n" + clip(emp.getLearnings(), 1500);
+                sys += "\n\n【你自己的经验教训,务必避免重蹈覆辙】\n" + clip(emp.getLearnings(), 700);
             }
             messages.add(new ChatMessage("system", sys));
             if (task.getContextText() != null && !task.getContextText().isEmpty()) {
+                // 上游产出全量透传时,一个任务的输入能有几万字,而其中大部分与本次任务无关。
+                // 超长就保留头尾(结论与收尾常在两端),中间标注省略 —— 既省钱又不丢主线。
                 messages.add(new ChatMessage("user", "以下是上游岗位的产出,作为本次任务的参考输入:\n"
-                        + task.getContextText() + "\n\n请基于以上材料完成任务。"));
+                        + clipMiddle(task.getContextText(), 6000) + "\n\n请基于以上材料完成任务。"));
             }
             messages.add(new ChatMessage("user", task.getInstruction()));
 
@@ -256,11 +261,11 @@ public class TaskService {
                 p.put("taskId", taskId);
                 p.put("delta", delta);
                 pusher.push("task-delta", p);
-            }, null, jsonTask, jsonTask ? 4000 : 0);
+            }, null, jsonTask, EXEC_MAX_TOKENS);
 
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
-                    CeoLoopService.estimateTokens(promptChars + result.length()),
-                    usedModel));
+                    llm.tokensUsed(CeoLoopService.estimateTokens(promptChars + result.length())),
+                    llm.lastModel()));
 
             // 复盘任务完成:教训沉淀进全员知识库 + 岗位自己的成长档案(自学习闭环)
             if (task.getInstruction() != null && task.getInstruction().startsWith(RETRO_TAG)) {
@@ -331,7 +336,13 @@ public class TaskService {
         boolean isRetro = instruction.startsWith(RETRO_TAG);
         if (isRetro) return; // 复盘本身失败不再套娃
 
-        // 失败 → 自动派复盘任务
+        // 失败 → 自动派复盘任务。但复盘本身也是一次模型调用:
+        // 同一个岗位 30 分钟内只复盘一次,否则"失败→复盘→再失败"会变成连环烧钱。
+        if (retroRecent(emp, Duration.ofMinutes(30))) {
+            log.info("自学习: 岗位{} 30 分钟内已复盘过,跳过本轮复盘", emp.getName());
+            checkCircuit(emp, failedTask);
+            return;
+        }
         try {
             Task retro = new Task();
             retro.setEmployee(emp);
@@ -345,7 +356,11 @@ public class TaskService {
             enqueue(retro.getId());
         } catch (Exception ignored) {}
 
-        // 连续失败熔断:同岗位连续 3 次失败自动叫停,上报创始人
+        checkCircuit(emp, failedTask);
+    }
+
+    /** 连续失败熔断:同岗位连续 3 次失败自动叫停,上报创始人 */
+    private void checkCircuit(Employee emp, Task failedTask) {
         try {
             List<Task> recent = new ArrayList<>();
             for (Task t : taskRepo.findTop200ByOrderByCreatedAtDesc()) {
@@ -386,9 +401,35 @@ public class TaskService {
 
     static final String RETRO_TAG = "【复盘】";
 
+    /** 单次任务的输出上限。不传的话服务商默认常是 4K,长文案写到一半就断,返工一次等于双倍花钱。 */
+    static final int EXEC_MAX_TOKENS = 8000;
+
     private static String clip(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    /** 该岗位最近 window 内是否已经派过复盘任务。 */
+    private boolean retroRecent(Employee emp, Duration window) {
+        Instant since = Instant.now().minus(window);
+        int n = 0;
+        for (Task t : taskRepo.findTop200ByOrderByCreatedAtDesc()) {
+            if (n++ >= 50) break;
+            if (t.getEmployee() == null || !emp.getId().equals(t.getEmployee().getId())) continue;
+            if (t.getInstruction() == null || !t.getInstruction().startsWith(RETRO_TAG)) continue;
+            if (t.getCreatedAt() != null && t.getCreatedAt().isAfter(since)) return true;
+        }
+        return false;
+    }
+
+    /** 超长文本保留头尾各一半,中间标记省略 —— 比只截前面更不容易丢掉结论。 */
+    static String clipMiddle(String s, int max) {
+        if (s == null) return "";
+        if (s.length() <= max) return s;
+        int keep = Math.max(200, (max - 40) / 2);
+        int omitted = s.length() - keep * 2;
+        return s.substring(0, keep) + "\n\n…(此处省略 " + omitted + " 字,与本次任务无关的内容已裁掉)…\n\n"
+                + s.substring(s.length() - keep);
     }
 
     @Transactional

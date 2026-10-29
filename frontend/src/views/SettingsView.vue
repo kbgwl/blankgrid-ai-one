@@ -102,6 +102,33 @@
                 <span v-if="dsState.detail" class="ds-detail" :class="dsState.ok ? 'ok' : 'err'">{{ dsState.detail }}</span>
               </p>
             </div>
+
+            <!-- 省钱模式:唯一出口拦一道,防止任何一处写死的贵模型偷偷烧钱 -->
+            <div class="decision-slot cheap-slot" :class="{ dirty: dirty('enforceCheap') || dirty('cheapModel') }">
+              <div class="ds-head">
+                <b>省钱模式</b>
+                <span class="ds-sub">所有调用统一拦一道:员工档案、任务记录、决策槽位里写的贵模型,发请求前都换成省钱模型</span>
+                <span class="badge sm" :class="form.enforceCheap ? 'ok' : 'warn'">{{ form.enforceCheap ? '已开启' : '已关闭' }}</span>
+              </div>
+              <div class="prov-grid">
+                <label class="pf check"><span>强制走便宜模型</span><el-switch v-model="form.enforceCheap" /></label>
+                <label class="pf check"><span>关闭模型思考</span><el-switch v-model="form.thinkingOff" /></label>
+                <label class="pf"><span>省钱模型</span>
+                  <el-select v-model="form.cheapModel" size="small" filterable allow-create default-first-option
+                             :placeholder="(form.providers[0] || {}).model || 'deepseek-flash'">
+                    <el-option v-for="m in cheapModelOptions" :key="m" :label="m" :value="m" />
+                  </el-select>
+                </label>
+              </div>
+              <p class="ds-now">
+                名字里带 <code>pro / reasoner / thinking / max / opus / gpt-4 / gpt-5</code> 的一律换成
+                <b>{{ form.cheapModel || 'deepseek-flash' }}</b>;<code>flash / mini / lite</code> 这类便宜档原样保留。
+                <span class="ds-detail">贵模型单价常是便宜档的 4~8 倍,一次长报告就能吃掉一天的预算。</span>
+                <br />
+                关掉「模型思考」省得更多:DeepSeek 默认开思考且力度 high,推理过程按输出 token 计费,
+                长任务里能占一半以上,还常把输出上限吃光导致正文为空、任务失败重来。写文案、写方案不需要它。
+              </p>
+            </div>
           </div>
           <p class="tip">「检测连通」只从浏览器确认网关地址能否访问;「测一次」由后端真发一条最小请求,验证密钥与模型名确实可用,密钥不出本机、不回显。</p>
         </section>
@@ -221,7 +248,9 @@
               </div>
             </div>
             <div class="set-row" :class="{ dirty: dirty('dailyTokenBudget') }">
-              <div class="lbl"><b>每日 token 预算</b><span>到顶自动暂停 CEO 自动巡视,0 = 不限</span></div>
+              <div class="lbl"><b>每日 token 预算</b>
+                <span>到顶自动暂停 CEO 自动巡视,0 = 不限 · 今日已用 {{ fmtTokens(tokensToday) }} token(≈{{ money(costInfo.today) }})</span>
+              </div>
               <div class="ctl stepper-ctl"><el-input-number v-model="form.dailyTokenBudget" :min="0" :step="10000" size="small" controls-position="right" /></div>
             </div>
             <div class="set-row col" :class="{ dirty: dirty('knowledgeBase') }">
@@ -297,6 +326,8 @@ const defaults = {
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
   reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
   decisionProvider: '', decisionModel: '',
+  // 省钱模式:默认开。贵模型单价是便宜档的数倍,先开着,真要高质量再关
+  enforceCheap: true, cheapModel: 'deepseek-flash', thinkingOff: true,
   exportDir: '', autoExportArtifacts: true,
   // null = 请求里不带这个字段,后端保留原值;用户真改了单价才变成数组
   pricing: null, pdfFontPath: ''
@@ -338,6 +369,7 @@ function fmtTokens(n) {
   n = Number(n || 0)
   return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
 }
+const tokensToday = computed(() => (costInfo.models || []).reduce((n, m) => n + Number(m.tokensToday || 0), 0))
 function money(v) {
   const n = Number(v || 0)
   if (n <= 0) return '¥0'
@@ -414,6 +446,14 @@ function onlyPrimary(i) {
    手敲模型名写错时接口返回 400,生产线整段停摆,排查成本比多按一次按钮高得多。
    只对已保存的服务商生效——密钥存后端,这里只传服务商名,密钥不回浏览器。 */
 const modelOptions = reactive({})
+
+/** 省钱模型的候选:常见便宜档 + 各服务商已拉取到的模型名 */
+const cheapModelOptions = computed(() => {
+  const set = new Set(['deepseek-flash', 'deepseek-chat', 'glm-4-flash', 'qwen-plus', 'gpt-4o-mini'])
+  Object.values(modelOptions).forEach(list => (list || []).forEach(m => set.add(m)))
+  form.value.providers.forEach(p => { if (p.model) set.add(p.model) })
+  return [...set]
+})
 const fetching = ref(-1)
 const dsFetching = ref(false)
 

@@ -31,6 +31,7 @@ public class StatsController {
     private final ArtifactRepository artRepo;
     private final com.blankgrid.aione.service.CostService costs;
     private final com.blankgrid.aione.service.CompanyEngineService engine;
+    private final com.blankgrid.aione.service.LlmService llm;
 
     public StatsController(TaskRepository taskRepo, EmployeeRepository empRepo,
                            com.blankgrid.aione.repo.TokenLogRepository tokenRepo,
@@ -38,7 +39,8 @@ public class StatsController {
                            GoalRepository goalRepo, DeliverableRepository delRepo,
                            ArtifactRepository artRepo,
                            com.blankgrid.aione.service.CostService costs,
-                           com.blankgrid.aione.service.CompanyEngineService engine) {
+                           com.blankgrid.aione.service.CompanyEngineService engine,
+                           com.blankgrid.aione.service.LlmService llm) {
         this.taskRepo = taskRepo;
         this.empRepo = empRepo;
         this.tokenRepo = tokenRepo;
@@ -48,12 +50,15 @@ public class StatsController {
         this.artRepo = artRepo;
         this.costs = costs;
         this.engine = engine;
+        this.llm = llm;
     }
 
     @GetMapping
     public Map<String, Object> stats() {
         Instant dayStart = Instant.now().truncatedTo(ChronoUnit.DAYS);
         Map<String, Object> m = new LinkedHashMap<>();
+        // 最近一次模型调用的真实用量:用来核对"一次任务到底花多少",不再只看总额
+        m.put("lastLlm", llm.lastCallInfo());
         m.put("pending", taskRepo.countByStatus(Task.PENDING));
         m.put("running", taskRepo.countByStatus(Task.RUNNING));
         m.put("done", taskRepo.countByStatus(Task.DONE));

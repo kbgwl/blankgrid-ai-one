@@ -28,7 +28,7 @@ class LlmServiceTest {
         SettingsService.Settings s = new SettingsService.Settings();
         s.providers = new ArrayList<>(List.of(providers));
         settings.save(s);
-        return new LlmService(settings);
+        return new LlmService(settings, tempDir.toString());
     }
 
     @Test

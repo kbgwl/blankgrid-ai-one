@@ -61,6 +61,18 @@ public class SettingsService {
         public String decisionProvider;
         /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
         public String decisionModel;
+        /**
+         * 省钱模型:开了省钱模式后,任何贵模型(pro/reasoner/thinking/max…)都会被换成它。
+         * 空 = 用内置默认(deepseek-flash)。
+         */
+        public String cheapModel = "deepseek-flash";
+        /** 省钱模式。null = 老配置没这个字段,按开启处理 */
+        public Boolean enforceCheap;
+        /**
+         * 关闭模型思考模式(null = 按开启处理)。思考 token 按输出计费,
+         * 而且默认 effort=high,是长任务里最贵也最没必要的一块。
+         */
+        public Boolean thinkingOff;
         /** 模型单价表(元/百万 token);空 = 用内置参考价。按前缀匹配模型名 */
         public List<Price> pricing;
         /** PDF 导出用的中文字体文件;空 = 自动找系统里的微软雅黑/黑体/Noto */
@@ -81,6 +93,9 @@ public class SettingsService {
             this.model = model; this.input = input; this.output = output;
         }
     }
+
+    /** 省钱模式默认用的模型:便宜十倍,写方案/写文案够用 */
+    public static final String DEFAULT_CHEAP_MODEL = "deepseek-flash";
 
     /**
      * 内置参考价(元 / 百万 token)。只是量级参考,真实账单以服务商为准;
@@ -124,6 +139,9 @@ public class SettingsService {
             if (cache.providers == null) cache.providers = new ArrayList<>();
             // 老配置文件没有这个字段:默认开着,别让升级把落盘功能悄悄关掉
             if (cache.autoExportArtifacts == null) cache.autoExportArtifacts = Boolean.TRUE;
+            if (cache.enforceCheap == null) cache.enforceCheap = Boolean.TRUE;
+            if (cache.thinkingOff == null) cache.thinkingOff = Boolean.TRUE;
+            if (cache.cheapModel == null || cache.cheapModel.isBlank()) cache.cheapModel = DEFAULT_CHEAP_MODEL;
         }
         return cache;
     }
@@ -157,6 +175,11 @@ public class SettingsService {
         if (incoming.decisionModel != null) current.decisionModel = incoming.decisionModel.trim();
         // 单价表与 PDF 字体:同样只在请求真带了的时候覆盖,免得老客户端把它清空
         if (incoming.pricing != null) current.pricing = incoming.pricing;
+        if (incoming.cheapModel != null) {
+            current.cheapModel = incoming.cheapModel.isBlank() ? DEFAULT_CHEAP_MODEL : incoming.cheapModel.trim();
+        }
+        if (incoming.enforceCheap != null) current.enforceCheap = incoming.enforceCheap;
+        if (incoming.thinkingOff != null) current.thinkingOff = incoming.thinkingOff;
         if (incoming.pdfFontPath != null) current.pdfFontPath = incoming.pdfFontPath.trim();
         // 口令:空或掩码回传则保留原值;__CLEAR__ 表示清除
         if ("__CLEAR__".equals(incoming.password)) {
@@ -326,6 +349,34 @@ public class SettingsService {
     public String defaultModel() {
         Provider p = primaryProvider();
         return p == null ? "" : (p.model == null ? "" : p.model);
+    }
+
+    // ==================== 省钱模式 ====================
+
+    /** 是否关闭模型思考模式。默认关思考:省下的钱比多出来的推理值钱。 */
+    public boolean thinkingOff() {
+        return !Boolean.FALSE.equals(get().thinkingOff);
+    }
+
+    /** 是否强制所有调用都避开贵模型。默认开。 */
+    public boolean enforceCheap() {
+        return !Boolean.FALSE.equals(get().enforceCheap);
+    }
+
+    /** 省钱模型名(空则退回内置默认)。 */
+    public String cheapModel() {
+        String m = get().cheapModel;
+        return (m == null || m.isBlank()) ? DEFAULT_CHEAP_MODEL : m.trim();
+    }
+
+    /**
+     * 一次调用的最终模型名:调用方想要的 → 省钱护栏 → 服务商默认。
+     * 这是全系统唯一的"发请求前定模型"入口,别在别处再自己拼。
+     */
+    public String resolveModel(String want) {
+        String actual = ModelGuard.resolve(want, cheapModel(), enforceCheap());
+        if (actual == null || actual.isBlank()) actual = defaultModel();
+        return actual;
     }
 
     /** 当前单价表(内置 + 用户覆盖),给设置页和前端展示 */

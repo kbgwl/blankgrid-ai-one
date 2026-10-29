@@ -316,8 +316,11 @@ public class CompanyEngineService {
         String planModel = settings.decisionModel(ceo.getModel());
         String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
                 planModel, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
+        // 记账用服务商回传的真实用量 + 真实生效的模型名(省钱模式可能把 pro 换成 flash),
+        // 否则成本表会把便宜模型的量算成贵模型的钱,越看越吓人。
         tokenRepo.save(new TokenLog(null, goalId, "CEO_PLAN",
-                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), planModel));
+                llm.tokensUsed(CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length())),
+                llm.lastModel()));
 
         boolean truncated = llm.lastTruncated() || LooseJson.looksTruncated(reply);
         JsonNode root = LooseJson.parse(mapper, reply);
@@ -494,7 +497,8 @@ public class CompanyEngineService {
         String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
                 lead.getModel(), null, null, true, PLAN_MAX_TOKENS);
         tokenRepo.save(new TokenLog(null, g.getId(), "LEAD_PLAN",
-                CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length()), leadModel));
+                llm.tokensUsed(CeoLoopService.estimateTokens(sys.length() + user.length() + reply.length())),
+                llm.lastModel()));
 
         boolean truncated = llm.lastTruncated() || LooseJson.looksTruncated(reply);
         JsonNode root = LooseJson.parse(mapper, reply);
@@ -1578,7 +1582,8 @@ public class CompanyEngineService {
             String fixed = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
                     model, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
             tokenRepo.save(new TokenLog(null, goalId, "JSON_REPAIR",
-                    CeoLoopService.estimateTokens(sys.length() + user.length() + fixed.length()), model));
+                    llm.tokensUsed(CeoLoopService.estimateTokens(sys.length() + user.length() + fixed.length())),
+                    llm.lastModel()));
             return fixed;
         } catch (Exception e) {
             log.warn("JSON 自动修复调用失败: {}", e.getMessage());

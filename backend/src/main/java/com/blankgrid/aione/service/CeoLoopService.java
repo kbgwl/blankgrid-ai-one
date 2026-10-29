@@ -61,6 +61,8 @@ public class CeoLoopService {
     private final AtomicLong cycleCounter = new AtomicLong(0);
     private volatile Instant lastAutoCycle = null;
     private volatile Instant lastWeekly = null;
+    /** 最后一次真正调了模型的巡视时间:用于空转静默,避免闲时也在烧 token */
+    private volatile Instant lastRealCycle = null;
 
     public CeoLoopService(EmployeeRepository empRepo, TaskRepository taskRepo,
                           ActivityRepository activityRepo, TokenLogRepository tokenRepo,
@@ -109,8 +111,36 @@ public class CeoLoopService {
         }
         // 每 7 天自动生成一份 CEO 周报
         boolean weekly = lastWeekly == null || Instant.now().isAfter(lastWeekly.plus(7, ChronoUnit.DAYS));
+        // 空转静默:公司没活了(无活跃目标、无待办交付物、无待响应指令)就别让 CEO 每半小时
+        // 对着空办公室烧一次完整上下文。真闲了 4 小时才做一次例行评估,周报照走。
+        if (!weekly && !hasLiveWork()
+                && lastRealCycle != null && Instant.now().isBefore(lastRealCycle.plus(4, ChronoUnit.HOURS))) {
+            return;
+        }
         if (weekly) lastWeekly = Instant.now();
         runCycle(weekly);
+        lastRealCycle = Instant.now();
+    }
+
+    /**
+     * 公司现在有没有"活"要 CEO 管:创始人有未响应指令、目标在跑、交付物待办/受阻、任务在队列里。
+     * 全都没有 = CEO 这轮看了也只能说"暂无进展",这笔钱不值得花。
+     */
+    private boolean hasLiveWork() {
+        List<Activity> opens = activityRepo.findTop20ByTypeInAndStatusOrderByCreatedAtAsc(
+                List.of(Activity.GOAL, Activity.FEEDBACK), Activity.OPEN);
+        if (!opens.isEmpty()) return true;
+        for (Goal g : goalRepo.findAllByOrderByCreatedAtDesc()) {
+            if (Goal.ACTIVE.equals(g.getStatus()) || Goal.PLANNING.equals(g.getStatus())) return true;
+        }
+        if (!delRepo.findByStatusIn(List.of(Deliverable.PENDING, Deliverable.READY, Deliverable.RUNNING,
+                Deliverable.WAITING, Deliverable.BLOCKED)).isEmpty()) return true;
+        int n = 0;
+        for (Task t : taskRepo.findTop200ByOrderByCreatedAtDesc()) {
+            if (n++ >= 40) break;
+            if (Task.PENDING.equals(t.getStatus()) || Task.RUNNING.equals(t.getStatus())) return true;
+        }
+        return false;
     }
 
     public boolean isRunning() {
@@ -211,18 +241,20 @@ public class CeoLoopService {
         }
 
         // 近期任务与产出(每个岗位最近一条 DONE 给长产出,便于 CEO 审阅)
-        sb.append("\n【近期任务(最多 30 条)】\n");
+        // 从 30 条砍到 12 条:CEO 拍板看的是"哪里卡住了",不是把每个产出通读一遍。
+        // 30 条 × 每条最多 600 字,单次巡视光这一块就近万 token,一天几十轮就是纯烧钱。
+        sb.append("\n【近期任务(最多 12 条)】\n");
         List<Task> recent = taskRepo.findTop200ByOrderByCreatedAtDesc();
         int n = 0;
         Map<Long, Boolean> longExcerptGiven = new LinkedHashMap<>();
         for (Task t : recent) {
-            if (n++ >= 30) break;
+            if (n++ >= 12) break;
             sb.append("- #").append(t.getId()).append(" ").append(t.getEmployee().getName())
               .append(" [").append(t.getStatus()).append("] ").append(clip(t.getInstruction(), 60));
             if (Task.DONE.equals(t.getStatus()) && t.getResult() != null && !t.getResult().isBlank()) {
                 Long empId = t.getEmployee().getId();
                 boolean longView = longExcerptGiven.putIfAbsent(empId, true) == null;
-                sb.append(" ⇒ 产出:").append(clip(t.getResult(), longView ? 600 : 160));
+                sb.append(" ⇒ 产出:").append(clip(t.getResult(), longView ? 240 : 80));
             }
             if (Task.FAILED.equals(t.getStatus()) && t.getError() != null) {
                 sb.append(" ⇒ 失败原因:").append(clip(t.getError(), 200));
@@ -233,7 +265,7 @@ public class CeoLoopService {
 
         String kb = settings.get().knowledgeBase;
         if (kb != null && !kb.isBlank()) {
-            sb.append("\n【公司知识库(含历史经验教训)】\n").append(clip(kb, 2000)).append("\n");
+            sb.append("\n【公司知识库(含历史经验教训)】\n").append(clip(kb, 900)).append("\n");
         }
 
         sb.append("\n【你的输出要求】只输出一个 JSON 对象,不要输出任何其他文字:\n");
@@ -271,7 +303,7 @@ public class CeoLoopService {
         String cycleModel = settings.decisionModel(null);
         String reply = llm.chatStream(messages, cycleModel, null, settings.decisionProvider());
         tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(null, (Long) null, "CEO",
-                estimateTokens(sb.length() + sys.length() + reply.length()), cycleModel));
+                llm.tokensUsed(estimateTokens(sb.length() + sys.length() + reply.length())), llm.lastModel()));
         return reply;
     }
 

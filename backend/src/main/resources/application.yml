@@ -5,7 +5,10 @@ spring:
   application:
     name: aione
   datasource:
-    url: jdbc:h2:file:./data/aione;MODE=MySQL;AUTO_SERVER=TRUE
+    # AUTO_SERVER 会额外开一个 TCP 端口,而这个端口可能和本机其它程序撞车
+    # (实测撞过一次,启动直接失败且报错指向的端口跟 8090 毫无关系,很难查)。
+    # 本项目只有一个后端进程访问数据库,独占文件访问就够。
+    url: jdbc:h2:file:./data/aione;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
