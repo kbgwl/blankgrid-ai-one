@@ -25,7 +25,12 @@ export function renderMarkdown(src) {
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>')
+    // 裸链接也要能点。模型很爱直接甩一条 item.jd.com/xxx 出来,
+    // 不转成 <a> 的话用户只能手动选中复制 —— 「点开就能下单」到这一步就断了。
+    // 前置字符排除引号:否则会把上面刚生成的 href="https://..." 再包一层。
+    .replace(/(^|[\s，。、；：（(【])(https?:\/\/[^\s<>"'）)】]，。、；：！？]+)/g,
+      '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$2</a>')
 
   const lines = text.split('\n')
   const out = []

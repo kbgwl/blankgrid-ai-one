@@ -334,6 +334,9 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
 .md-content li::marker { color: var(--glow-cyan-dim); }
 .md-content strong { color: var(--text-moon); font-weight: 500; }
 .md-content a { color: var(--glow-cyan); text-decoration: none; border-bottom: 1px solid rgba(var(--rgb-glow), .3); }
+/* 商品直链又长又带参数,不强制断词会把表格和段落撑歪 */
+.md-content a.md-link { word-break: break-all; }
+.md-content a:hover { border-bottom-color: var(--glow-cyan); }
 .md-content blockquote {
   margin: 18px 0; padding: 12px 18px; border-left: 2px solid rgba(var(--rgb-glow), .4);
   background: rgba(var(--rgb-glow), .04); border-radius: 0 8px 8px 0; color: var(--text-dim);

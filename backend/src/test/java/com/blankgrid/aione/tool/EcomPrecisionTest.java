@@ -122,7 +122,8 @@ class EcomPrecisionTest {
         a.putObject("priceInfo").put("price", 8999).put("lowestCouponPrice", 8899);
         a.putObject("shopInfo").put("shopName", "Apple产品京东自营旗舰店");
         a.put("inOrderCount30Days", 860);
-        a.put("materialUrl", "https://item.jd.com/100001.html");
+        // 故意给一条推广短链:输出里必须换成 skuId 直链,不能让用户多点一次跳转
+        a.put("materialUrl", "https://u.jd.com/AbCdEf");
 
         var b = arr.addObject();
         b.put("skuName", "iPhone 17 Pro 256G 港版 全新未激活 代购");
@@ -206,7 +207,7 @@ class EcomPrecisionTest {
         jd(jdSkuBody());
         EcomSearchTool tool = new EcomSearchTool(settings());
 
-        String out = tool.execute("{\"skuIds\":\"100099\"}", ToolContext.empty());
+        String out = tool.execute("{\"skuIds\":\"100099\",\"platforms\":\"jd\"}", ToolContext.empty());
 
         assertEquals("jd.union.open.goods.query", lastJd.get().get("method"),
                 "传了 skuIds 就该走商品详情接口:" + lastJd.get());
@@ -224,7 +225,7 @@ class EcomPrecisionTest {
         jd(jdSkuBody());
         EcomSearchTool tool = new EcomSearchTool(settings());
 
-        tool.execute("{\"skuIds\":\"https://item.jd.com/100099.html\"}", ToolContext.empty());
+        tool.execute("{\"skuIds\":\"https://item.jd.com/100099.html\",\"platforms\":\"jd\"}", ToolContext.empty());
 
         JsonNode biz = M.readTree(lastJd.get().get("360buy_param_json"));
         assertEquals(100099L, biz.path("goodsReqDTO").path("skuIds").path(0).asLong());
@@ -278,5 +279,62 @@ class EcomPrecisionTest {
 
         assertTrue(out.contains("不代下单"), out);
         assertTrue(out.contains("激活或拆封后不支持 7 天无理由"), out);
+    }
+
+    /**
+     * 「点开就能下单」的关键:链到的是**那一款商品的购买页**,不是搜索结果页、不是店铺页。
+     * 京东的 skuId 本身就是最小销售单位(一色一容量一个 id),拼出来的地址打开就是那款,
+     * 不用再选规格;联盟给的 u.jd.com 短链要跳一次、还可能落活动页,所以不能用它当主链接。
+     */
+    @Test
+    @DisplayName("下单直链:京东用 skuId 直拼,推广短链不进主链接")
+    void jdBuyUrlIsSkuPage() throws Exception {
+        jd(jdSearchBody());
+        EcomSearchTool tool = new EcomSearchTool(settings());
+
+        String out = tool.execute("{\"keyword\":\"iPhone\",\"platforms\":\"jd\"}", ToolContext.empty());
+
+        assertTrue(out.contains("下单:https://item.jd.com/100001.html"), "应给出 skuId 直链:\n" + out);
+        assertFalse(out.contains("u.jd.com"), "推广短链不该出现在下单地址里:\n" + out);
+    }
+
+    @Test
+    @DisplayName("下单直链:天猫店走 detail.tmall.com,集市店走 item.taobao.com")
+    void tbBuyUrlByShopType() throws Exception {
+        tb("""
+                {"tbk_dg_material_optional_response":{"result_list":{"map_data":[
+                  {"title":"Apple iPhone 17 Pro 256GB 国行","item_id":"7001","zk_final_price":"8999.00",
+                   "coupon_amount":"0","volume":320,"shop_title":"Apple Store 官方旗舰店",
+                   "item_url":"https://s.click.taobao.com/xyz","user_type":1},
+                  {"title":"iPhone 17 Pro 256G 国行 全新","item_id":"7002","zk_final_price":"8899.00",
+                   "coupon_amount":"0","volume":60,"shop_title":"某数码店",
+                   "item_url":"https://s.click.taobao.com/abc","user_type":0}
+                ]}}}
+                """);
+        EcomSearchTool tool = new EcomSearchTool(settings());
+
+        String out = tool.execute("{\"keyword\":\"iPhone\",\"platforms\":\"tb\"}", ToolContext.empty());
+
+        assertTrue(out.contains("下单:https://detail.tmall.com/item.htm?id=7001"),
+                "天猫店应给 detail.tmall.com 直链:\n" + out);
+        assertTrue(out.contains("下单:https://item.taobao.com/item.htm?id=7002"),
+                "集市店应给 item.taobao.com 直链:\n" + out);
+        assertFalse(out.contains("s.click.taobao.com"), "推广短链不该出现在下单地址里:\n" + out);
+    }
+
+    @Test
+    @DisplayName("没有商品编号时才退回推广链接,总比给不出链接强")
+    void fallsBackToPromoUrlWithoutId() throws Exception {
+        tb("""
+                {"tbk_dg_material_optional_response":{"result_list":{"map_data":[
+                  {"title":"无编号商品","zk_final_price":"10.00","shop_title":"某店",
+                   "item_url":"https://s.click.taobao.com/only","user_type":0}
+                ]}}}
+                """);
+        EcomSearchTool tool = new EcomSearchTool(settings());
+
+        String out = tool.execute("{\"keyword\":\"随便\",\"platforms\":\"tb\"}", ToolContext.empty());
+
+        assertTrue(out.contains("下单:https://s.click.taobao.com/only"), out);
     }
 }

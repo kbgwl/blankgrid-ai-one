@@ -156,7 +156,7 @@ public class EcomSearchTool implements AiTool {
     /** 归一化后的一个商品。两个平台的字段名完全不一样,先统一再排序。 */
     private record Item(String platform, String title, BigDecimal finalPrice, BigDecimal originalPrice,
                         String couponText, int sales30d, String shop, String url, String skuId,
-                        BigDecimal commissionRate, String risk, boolean tmall) {
+                        BigDecimal commissionRate, String risk, boolean tmall, String promoUrl) {
         /** 到手价排序用的键;null 视为最贵,排最后 */
         BigDecimal sortKey() {
             return finalPrice == null ? new BigDecimal("99999999") : finalPrice;
@@ -165,6 +165,35 @@ public class EcomSearchTool implements AiTool {
         boolean risky() {
             return risk != null && !risk.isBlank();
         }
+    }
+
+    /**
+     * 生成「点开就是这一款、点一下就下单」的直链。
+     *
+     * <p>关键差别在有没有把规格写进 URL:
+     * <ul>
+     *   <li>京东的 skuId 本身就是最小销售单位 —— 一个颜色一个容量一个 id,
+     *       所以 item.jd.com/{skuId}.html 打开就是那一款,不用再选规格。</li>
+     *   <li>淘宝/天猫的 itemId 是 SPU 级,打开还要选颜色容量。{@code detail.tmall.com}
+     *       比 {@code item.taobao.com} 少一次跳转,天猫店优先走它。</li>
+     *   <li>联盟给的推广短链(u.jd.com / s.click.taobao.com)会先经过跳转,还可能落到活动页 ——
+     *       能拿返佣,但采购时要的是"立刻能下单",所以这里放直链,推广链单独留着备用。</li>
+     * </ul>
+     *
+     * <p>上线前唯一的硬约束:平台自己的登录与支付没人能替,链接最多把你送到"立即购买"按钮前面。
+     */
+    private static String buyUrl(String platform, String id, boolean tmall) {
+        if (id == null || id.isBlank() || !id.matches("\\d+")) return "";
+        if ("京东".equals(platform)) return "https://item.jd.com/" + id + ".html";
+        return tmall
+                ? "https://detail.tmall.com/item.htm?id=" + id
+                : "https://item.taobao.com/item.htm?id=" + id;
+    }
+
+    /** 拿不到编号时,退回接口给的推广链接 —— 有跳转,但总比没有强。 */
+    private static String pickUrl(String direct, String promo) {
+        return direct != null && !direct.isBlank() ? direct
+                : (promo == null ? "" : promo.trim());
     }
 
     @Override
@@ -374,18 +403,16 @@ public class EcomSearchTool implements AiTool {
                 BigDecimal original = dec(price.path("price").asText(""));
                 String shop = n.path("shopInfo").path("shopName").asText("");
                 int sales = n.path("inOrderCount30Days").asInt(0);
-                String url = n.path("materialUrl").asText("");
-                if (url.isBlank()) url = n.path("goodsUrl").asText("");
-                if (url.isBlank()) {
-                    String sku = n.path("skuId").asText("");
-                    if (!sku.isBlank()) url = "https://item.jd.com/" + sku + ".html";
-                }
+                String promo = n.path("materialUrl").asText("");
+                if (promo.isBlank()) promo = n.path("goodsUrl").asText("");
+                String skuId = n.path("skuId").asText("");
                 BigDecimal coupon = dec(price.path("couponInfo").path("couponList").path(0).path("discount").asText(""));
                 String couponText = (coupon != null && coupon.compareTo(BigDecimal.ZERO) > 0)
                         ? "券 ¥" + coupon.stripTrailingZeros().toPlainString() : "";
-                out.add(new Item("京东", title, finalPrice, original, couponText, sales, shop, url,
-                        n.path("skuId").asText(""), dec(n.path("commissionInfo").path("commissionShare").asText("")),
-                        detectRisk(title), false));
+                out.add(new Item("京东", title, finalPrice, original, couponText, sales, shop,
+                        pickUrl(buyUrl("京东", skuId, false), promo),
+                        skuId, dec(n.path("commissionInfo").path("commissionShare").asText("")),
+                        detectRisk(title), false, promo));
             }
         }
         return out;
@@ -423,15 +450,13 @@ public class EcomSearchTool implements AiTool {
             // user_type: 0 集市店, 1 天猫 —— 采购时天猫通常更看重发票与售后
             boolean tmall = n.path("user_type").asInt(0) == 1;
             if (tmall && !shop.contains("天猫")) shop = shop + "(天猫)";
+            String itemId = n.path("item_id").asText("");
             String itemUrl = n.path("item_url").asText("");
-            if (itemUrl.isBlank()) {
-                String id = n.path("item_id").asText("");
-                if (!id.isBlank()) itemUrl = "https://item.taobao.com/item.htm?id=" + id;
-            }
             out.add(new Item("淘宝", title, finalPrice, zk, couponInfo.isBlank() && coupon != null
                     ? "券 ¥" + coupon.stripTrailingZeros().toPlainString(): couponInfo,
-                    n.path("volume").asInt(0), shop, itemUrl, n.path("item_id").asText(""),
-                    dec(n.path("commission_rate").asText("")), detectRisk(title), tmall));
+                    n.path("volume").asInt(0), shop,
+                    pickUrl(buyUrl("淘宝", itemId, tmall), itemUrl),
+                    itemId, dec(n.path("commission_rate").asText("")), detectRisk(title), tmall, itemUrl));
         }
         return out;
     }
@@ -471,9 +496,9 @@ public class EcomSearchTool implements AiTool {
             String shop = n.path("shop_title").asText(n.path("nick").asText(""));
             String id = n.path("num_iid").asText("");
             String itemUrl = n.path("item_url").asText("");
-            if (itemUrl.isBlank() && !id.isBlank()) itemUrl = "https://item.taobao.com/item.htm?id=" + id;
-            out.add(new Item("淘宝", title, price, price, "", 0, shop, itemUrl, id, null,
-                    detectRisk(title), false));
+            out.add(new Item("淘宝", title, price, price, "", 0, shop,
+                    pickUrl(buyUrl("淘宝", id, false), itemUrl),
+                    id, null, detectRisk(title), false, itemUrl));
         }
         return out;
     }
@@ -524,7 +549,8 @@ public class EcomSearchTool implements AiTool {
           .append(" · 按").append(bySales ? "30天销量" : "到手价").append("排序")
           .append(riskyCount > 0 ? " · 其中 " + riskyCount + " 条带风险标记,已排到最后" : "")
           .append("\n");
-        sb.append("(到手价 = 券后实付,已含平台折扣;不含运费,下单前请在结算页确认)\n\n");
+        sb.append("(到手价 = 券后实付,已含平台折扣;不含运费,下单前请在结算页确认)\n");
+        sb.append("(下面每条都给「下单」直链:点开就是这一款的商品页,京东 skuId 已锁定规格,登录后即可购买)\n\n");
 
         int i = 1;
         for (Item it : items) {
@@ -546,7 +572,9 @@ public class EcomSearchTool implements AiTool {
                 sb.append("\n   店铺:").append(it.shop());
                 if (!tag.isBlank()) sb.append(" [").append(tag).append("]");
             }
-            if (it.url() != null && !it.url().isBlank()) sb.append("\n   ").append(it.url());
+            // 标上「下单」二字不是排版问题:模型会照着这段的结构写进产出,
+            // 标注清楚它才会在最终交付物里把链接写成可直接点的下单地址,而不是含糊地说"可去购买"。
+            if (it.url() != null && !it.url().isBlank()) sb.append("\n   下单:").append(it.url());
             sb.append("\n");
         }
 

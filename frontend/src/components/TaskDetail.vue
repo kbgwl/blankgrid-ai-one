@@ -26,7 +26,13 @@
       <section class="logs" ref="logsEl">
         <div v-for="(log, i) in detail.logs" :key="i" class="log-item" :class="'role-' + log.role">
           <div class="log-role">{{ roleMap[log.role] || log.role }}</div>
-          <div class="log-content">{{ log.content }}</div>
+          <div class="log-content">
+            <template v-for="(p, pi) in linkParts(log.content)" :key="pi">
+              <a v-if="p.link" :href="p.text" target="_blank" rel="noopener noreferrer"
+                 class="log-link" :title="p.text">{{ shortUrl(p.text) }}</a>
+              <template v-else>{{ p.text }}</template>
+            </template>
+          </div>
         </div>
         <!-- 调工具时正文是空的,不单独提示的话界面看上去就是卡住了 -->
         <div v-if="isRunning && toolHint" class="log-item role-tool is-live">
@@ -134,6 +140,38 @@ function fmt(iso) {
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
+/* 日志里的链接要能直接点。
+   采购单最后一公里就是「点开就能下单」—— 卡在"选中、复制、粘到浏览器"这三步,
+   前面的比价做得再准也没人走完。 */
+const URL_RE = /(https?:\/\/[^\s<>"'）)，。、；：！？]+)/g
+
+function linkParts(text) {
+  if (!text) return []
+  const s = String(text)
+  const out = []
+  let last = 0
+  for (const m of s.matchAll(URL_RE)) {
+    if (m.index > last) out.push({ link: false, text: s.slice(last, m.index) })
+    out.push({ link: true, text: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < s.length) out.push({ link: false, text: s.slice(last) })
+  return out
+}
+
+/** 展示用短链:完整地址又长又带一堆 tracking 参数,列表里读不动;原始地址留给 href 和 title */
+function shortUrl(u) {
+  try {
+    const x = new URL(u)
+    const host = x.host.replace(/^www\./, '')
+    const path = x.pathname && x.pathname !== '/' ? x.pathname : ''
+    const s = host + path
+    return s.length > 40 ? s.slice(0, 40) + '…' : s
+  } catch {
+    return u
+  }
+}
+
 async function cancel() {
   await api.cancelTask(props.taskId)
   detail.value = await api.taskDetail(props.taskId)
@@ -202,6 +240,13 @@ async function jump(id) {
 .log-role { font-size: 10px; letter-spacing: .25em; color: var(--text-faint); margin-bottom: 8px; }
 .role-assistant .log-role { color: var(--glow-cyan-dim); }
 .log-content { font-size: 13px; line-height: 1.9; white-space: pre-wrap; color: var(--text-moon); }
+/* 下单链接:一眼能看出是可点的,但不要做成蓝底白字的按钮 —— 一屏十几条会吵死 */
+.log-link {
+  color: var(--glow-cyan); text-decoration: none; word-break: break-all;
+  border-bottom: 1px dashed rgba(var(--rgb-glow), .45);
+  transition: border-color .25s var(--ease-quiet), color .25s var(--ease-quiet);
+}
+.log-link:hover { border-bottom-style: solid; border-bottom-color: var(--glow-cyan); }
 footer.task-actions { text-align: right; display: flex; justify-content: flex-end; gap: 10px; }
 
 /* 执行中:任务头部一条走不完的施工线,正文边出边滚 */
