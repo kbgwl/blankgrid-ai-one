@@ -41,6 +41,15 @@
           <span v-if="art.manualEdit" class="manual-tag">人工修订</span>
           <span>{{ fmt(art.createdAt) }}</span>
         </div>
+        <!-- 返工过的交付物会有多个版本。只看最终版看不出「这次到底改了什么」,
+             所以把历次版本摊开:每一版都带自己的分数与评审意见,可来回对照。 -->
+        <div v-if="versions.length > 1" class="art-vers">
+          <span class="vers-label">历史版本</span>
+          <button v-for="v in versions" :key="v.id" class="ver-chip"
+                  :class="{ 'is-on': v.id === art.id }" @click="openVersion(v.id)">
+            v{{ v.version }}<i v-if="v.score">{{ v.score }}分</i>
+          </button>
+        </div>
       </header>
 
       <section v-if="art.reviewNotes" class="review-note glass">
@@ -132,11 +141,32 @@ async function adopt() {
   } finally { adopting.value = false }
 }
 
+/* ===== 历史版本:返工过的交付物能看到每一版改了什么、得了多少分 ===== */
+const versions = ref([])
+
+async function loadVersions(a) {
+  if (!a || !a.deliverableId) return
+  try {
+    const list = await api.artifacts({ deliverableId: a.deliverableId })
+    versions.value = Array.isArray(list) ? list : []
+  } catch (e) { versions.value = [] }
+}
+
+async function openVersion(id) {
+  if (id === art.value?.id) return
+  editing.value = false
+  try { art.value = await api.artifact(id) } catch (e) { ElMessage.error('该版本载入失败') }
+}
+
 watch(() => [props.modelValue, props.artifactId], async ([open, id]) => {
   if (!open || !id) return
   art.value = null
   editing.value = false
-  try { art.value = await api.artifact(id) } catch (e) { ElMessage.error('成果载入失败') }
+  versions.value = []
+  try {
+    art.value = await api.artifact(id)
+    loadVersions(art.value)
+  } catch (e) { ElMessage.error('成果载入失败') }
 })
 
 function fmt(iso) {
@@ -181,6 +211,17 @@ async function saveToDir(format) {
 .art-loading { color: var(--text-faint); text-align: center; padding: 120px 0; letter-spacing: .3em; }
 /* 人工修订:正文变成可写的稿纸,不再只是展示 */
 .manual-tag { color: var(--st-warn); letter-spacing: .12em; }
+.art-vers { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.vers-label { font-size: 10.5px; letter-spacing: .2em; color: var(--text-faint); }
+.ver-chip {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  padding: 3px 10px; border-radius: 999px; font-size: 10.5px; letter-spacing: .06em;
+  background: var(--chip-bg); color: var(--text-dim); border: 1px solid transparent;
+  font-family: var(--font-mono); transition: color .2s, border-color .2s;
+}
+.ver-chip i { font-style: normal; color: var(--text-faint); font-size: 10px; }
+.ver-chip:hover { color: var(--glow-cyan); }
+.ver-chip.is-on { color: var(--glow-cyan); border-color: rgba(var(--rgb-glow), .38); }
 .art-edit { margin-top: 20px; }
 .art-edit :deep(.el-textarea__inner) {
   background: var(--surface-2, rgba(255,255,255,.02)); color: var(--text-main);

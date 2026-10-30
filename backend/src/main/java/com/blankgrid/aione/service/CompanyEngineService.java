@@ -60,6 +60,7 @@ public class CompanyEngineService {
     private final ExportService exportService;
     private final EventPusher pusher;
     private final ObjectMapper mapper;
+    private final LearningService learning;
 
     private final Set<Long> planningGoals = ConcurrentHashMap.newKeySet();
     private final Set<Long> planningWorkstreams = ConcurrentHashMap.newKeySet();
@@ -135,7 +136,8 @@ public class CompanyEngineService {
                                 GoalService goalService, TaskService taskService,
                                 LlmService llm, SettingsService settings,
                                 ExportService exportService,
-                                EventPusher pusher, ObjectMapper mapper) {
+                                EventPusher pusher, ObjectMapper mapper,
+                                LearningService learning) {
         this.goalRepo = goalRepo;
         this.wsRepo = wsRepo;
         this.delRepo = delRepo;
@@ -153,6 +155,7 @@ public class CompanyEngineService {
         this.exportService = exportService;
         this.pusher = pusher;
         this.mapper = mapper;
+        this.learning = learning;
     }
 
     // ==================== 事件入口 ====================
@@ -774,8 +777,25 @@ public class CompanyEngineService {
         if (!facts.isBlank()) sb.append("\n").append(facts).append("\n");
         if (d.getAttempts() > 1) {
             sb.append("\n【返工要求】这是第 ").append(d.getAttempts()).append(" 次执行。必须逐条修复上次评审意见,不能只做表面修改。\n");
-            if (d.getReviewNotes() != null && !d.getReviewNotes().isBlank()) {
+            // 只给最后一版意见是不够的:第三次返工时,第一版指出的结构问题往往还没解决,
+            // 但 lastReviewNotes 已经被覆盖成第二轮的意见了 —— 模型于是只改最后一处,
+            // 修完还是同一批问题。把历次版本的意见按版本摊开,它才知道哪些是欠账。
+            List<Artifact> history = artRepo.findByDeliverableIdOrderByVersionDesc(d.getId());
+            int shown = 0;
+            for (Artifact a : history) {
+                if (shown >= 2) break;
+                if (a.getReviewNotes() == null || a.getReviewNotes().isBlank()) continue;
+                sb.append("【v").append(a.getVersion()).append(" 评审意见")
+                  .append(a.getScore() > 0 ? "(" + a.getScore() + " 分)" : "").append("】\n")
+                  .append(clip(a.getReviewNotes(), 1200)).append("\n");
+                shown++;
+            }
+            if (shown == 0 && d.getReviewNotes() != null && !d.getReviewNotes().isBlank()) {
                 sb.append("上次评审意见:\n").append(clip(d.getReviewNotes(), 2500)).append("\n");
+            }
+            if (shown > 1) {
+                sb.append("以上是两轮的意见。**先把上一轮还挂着的问题全部解决**,再谈新增内容 —— ");
+                sb.append("同一处被指出两次,说明上次只做了表面修改。\n");
             }
         }
         sb.append("\n【交付物】").append(d.getTitle()).append("(").append(nz(d.getOutputType())).append(")\n");
@@ -991,6 +1011,13 @@ public class CompanyEngineService {
                 pushGoal(g.getId());
             }
         } else {
+            // 返工之前,先把「这次为什么没通过」写进执行人的成长档案 ——
+            // 下一轮它会以「你自己的经验教训」出现在系统提示里,比只在这一次的任务说明里
+            // 提一句有效得多:同一岗位下次接同类活,不用再被同一个问题打回一遍。
+            Employee owner = d.getOwner();
+            if (owner != null) {
+                learning.add(owner, "评审", firstIssues(r.notes));
+            }
             // 评审说「缺事实」且分数明显不够:继续返工只会逼着它编,直接挂起等补料
             boolean factsMissing = r.needsInput != null && r.needsInput.isArray() && !r.needsInput.isEmpty();
             if (factsMissing && r.score < 70 && g != null) {
@@ -1618,6 +1645,24 @@ public class CompanyEngineService {
     }
 
     private static String nz(String s) { return s == null ? "" : s; }
+
+    /**
+     * 从评审意见里挑出最该被记住的一条。
+     *
+     * <p>评审的 notes 通常是一串编号条目,第一条往往就是最要命的那个问题。
+     * 整段塞进成长档案没有意义(档案只有几百字额度),所以只取第一条实质内容,
+     * 顺手剥掉「1.」「- 」「(1)」这类序号。
+     */
+    static String firstIssues(String notes) {
+        if (notes == null || notes.isBlank()) return "";
+        for (String line : notes.split("\n")) {
+            String t = line.replaceAll("^[\\s\\-*·•]+", "")
+                          .replaceAll("^[(（]?\\d{1,2}[.、)）]\\s*", "")
+                          .strip();
+            if (t.length() >= 6) return t;
+        }
+        return notes.strip();
+    }
 
     private static String clip(String s, int max) {
         if (s == null) return "";

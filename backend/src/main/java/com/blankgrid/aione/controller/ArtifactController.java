@@ -34,10 +34,15 @@ public class ArtifactController {
 
     @GetMapping
     public List<Map<String, Object>> list(@RequestParam(required = false) Long goalId,
+                                          @RequestParam(required = false) Long deliverableId,
                                           @RequestParam(required = false) String status,
                                           @RequestParam(required = false) String q) {
         List<Artifact> list;
-        if (goalId != null && status != null && !status.isBlank()) {
+        if (deliverableId != null) {
+            // 一条交付物的全部历史版本:返工过的会有 v1/v2/v3,
+            // 只有放在一起看才知道「这次改的是评审说的问题,还是换了个方向」。
+            list = artRepo.findByDeliverableIdOrderByVersionDesc(deliverableId);
+        } else if (goalId != null && status != null && !status.isBlank()) {
             list = artRepo.findByGoalIdAndStatusOrderByCreatedAtDesc(goalId, status);
         } else if (goalId != null) {
             list = artRepo.findByGoalIdOrderByCreatedAtDesc(goalId);

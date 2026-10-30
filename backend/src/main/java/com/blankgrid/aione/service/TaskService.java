@@ -47,6 +47,8 @@ public class TaskService {
     private final com.blankgrid.aione.repo.ActivityRepository activityRepo;
     private final ApplicationEventPublisher publisher;
     private final ToolRegistry tools;
+    private final LearningService learnings;
+    private final com.blankgrid.aione.repo.DeliverableRepository delRepo;
 
     private final Map<Long, ExecutorService> queues = new ConcurrentHashMap<>();
     private final Set<Long> cancelled = ConcurrentHashMap.newKeySet();
@@ -57,7 +59,9 @@ public class TaskService {
                        com.blankgrid.aione.repo.TokenLogRepository tokenRepo,
                        com.blankgrid.aione.repo.ActivityRepository activityRepo,
                        ApplicationEventPublisher publisher,
-                       ToolRegistry tools) {
+                       ToolRegistry tools,
+                       LearningService learnings,
+                       com.blankgrid.aione.repo.DeliverableRepository delRepo) {
         this.taskRepo = taskRepo;
         this.logRepo = logRepo;
         this.empRepo = empRepo;
@@ -68,6 +72,8 @@ public class TaskService {
         this.activityRepo = activityRepo;
         this.publisher = publisher;
         this.tools = tools;
+        this.learnings = learnings;
+        this.delRepo = delRepo;
     }
 
     /**
@@ -77,7 +83,6 @@ public class TaskService {
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterruptedTasks() {
         List<Task> running = taskRepo.findByStatus(Task.RUNNING);
-        if (running.isEmpty()) return;
         for (Task t : running) {
             t.setStatus(Task.FAILED);
             t.setError("服务重启,执行被中断;已自动重新排队");
@@ -95,7 +100,30 @@ public class TaskService {
             // 交给目标引擎按失败处理:重试或标记受阻,而不是让它无声地停在这里
             publisher.publishEvent(new TaskFinishedEvent(t.getId(), false, t.getError()));
         }
-        log.warn("启动恢复:{} 个中断任务已标记失败并重新排队", running.size());
+        if (!running.isEmpty()) log.warn("启动恢复:{} 个中断任务已标记失败并重新排队", running.size());
+
+        // 排队中的任务只存在于内存队列里,进程一重启就永远停在 PENDING ——
+        // 界面上看着"待处理",其实没有任何线程会去捡它。这类任务必须重新入队,
+        // 否则一个目标会因为一条卡住的交付物再也推不动。
+        List<Task> pending = taskRepo.findByStatus(Task.PENDING);
+        pending.sort(Comparator.comparing(Task::getId));
+        int requeued = 0, skipped = 0;
+        for (Task t : pending) {
+            if (requeued >= 30) break;   // 启动时最多捡 30 条,避免一口气压满服务商
+            if (!stillCurrent(t)) { skipped++; continue; }
+            enqueue(t.getId());
+            requeued++;
+        }
+        if (requeued > 0) log.warn("启动恢复:{} 个排队中的任务已重新入队", requeued);
+        if (skipped > 0) log.warn("启动恢复:{} 个排队任务已被后续轮次取代,不再执行", skipped);
+    }
+
+    /** 生产线上的任务只有仍挂在交付物名下时才该跑,否则是返工/RESET 之前的旧单。 */
+    private boolean stillCurrent(Task t) {
+        if (t.getDeliverableId() == null) return true;
+        return delRepo.findById(t.getDeliverableId())
+                .map(d -> d.getCurrentTaskId() == null || d.getCurrentTaskId().equals(t.getId()))
+                .orElse(false);
     }
 
     public Task submit(Long employeeId, String instruction, List<Long> contextTaskIds) {
@@ -315,6 +343,9 @@ public class TaskService {
             // 评审任务要的是结构化 JSON,截断续写只会把 JSON 拼坏,宁可让它整份重来
             if (!jsonTask) {
                 result = continueIfTruncated(messages, task, onDelta, taskId, result);
+                // 续写协议用的 [[DONE]]、推理阶段漏出的 <summary> 之类,不能印在交付物里:
+                // 评审会据此扣分,导出成 Word 时标签会原样进文档,最后还得人来擦。
+                result = OutputSanitizer.clean(result);
             }
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
                     llm.tokensUsed(CeoLoopService.estimateTokens(promptChars + result.length())),
@@ -324,18 +355,7 @@ public class TaskService {
             if (task.getInstruction() != null && task.getInstruction().startsWith(RETRO_TAG)) {
                 try {
                     settings.appendKnowledge(clip(result, 300));
-                    String add = clip(result.replace('\n', ' '), 200);
-                    String cur = emp.getLearnings() == null ? "" : emp.getLearnings();
-                    // 保留最近 10 条,新的在前
-                    String[] lines = cur.isBlank() ? new String[0] : cur.split("\n");
-                    StringBuilder merged = new StringBuilder("- " + add);
-                    int kept = 0;
-                    for (String line : lines) {
-                        if (line.isBlank() || merged.toString().contains(line)) continue;
-                        if (kept++ < 9) merged.append("\n").append(line);
-                    }
-                    emp.setLearnings(merged.toString());
-                    empRepo.save(emp);
+                    learnings.add(emp, "复盘", result);
                     logRepo.save(new TaskLog(task, "info", "本次复盘已沉淀进全员知识库与岗位成长档案"));
                 } catch (Exception ignored) {}
             }

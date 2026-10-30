@@ -23,6 +23,12 @@
       <section class="dispatch glass">
         <el-input v-model="instruction" type="textarea" :rows="3" resize="none"
                   placeholder="派一个任务给这位 AI……" />
+        <!-- 常见活不必每次现想措辞:点一下填进输入框,再改细节 -->
+        <div class="quick-row" v-if="quickTasks.length">
+          <span class="quick-label">常派</span>
+          <button v-for="q in quickTasks" :key="q" class="quick-chip" :title="q"
+                  @click="instruction = q">{{ q.length > 16 ? q.slice(0, 16) + '…' : q }}</button>
+        </div>
         <div class="dispatch-row">
           <el-select v-model="contextTaskId" placeholder="附上游产出(可选)" clearable size="small"
                      class="ctx-select" v-if="doneTasks.length">
@@ -162,6 +168,113 @@ const statusMap = {
 }
 
 const doneTasks = computed(() => tasks.value.filter(t => t.status === 'DONE'))
+
+/**
+ * 常派的活。
+ *
+ * <p>创始人一天要派十几次活,每次现想"怎么说清楚"是最没价值的时间。
+ * 这里按岗位给三条最典型的任务,点一下填进输入框再改细节 ——
+ * 注意只填措辞,不替它编数据:具体项目名、客户名仍然要人来补。
+ */
+const ROLE_TASKS = [
+  { match: /产品/, tasks: [
+    '写一份 XX 功能的 PRD:角色、主流程与异常分支、字段与状态、验收标准,能直接进开发',
+    '做三家同类产品的竞品拆解:核心流程、定价、目标客群、我们能切的差异点',
+    '把这次需求评审的结论整理成需求池,按优先级与工作量排序,标出依赖项'
+  ] },
+  { match: /设计|UI|UX|视觉/, tasks: [
+    '为 XX 页面出设计说明:布局、间距、字号层级、配色、交互状态与空态/错误态',
+    '按现有品牌资产整理一份组件规范:按钮、表单、卡片、表格的状态与尺寸',
+    '做一次可用性走查:列出三个最影响完成任务的设计问题,每条给修改方案'
+  ] },
+  { match: /前端/, tasks: [
+    '实现 XX 页面:给出完整可运行代码、组件拆分说明与边界情况处理',
+    '排查这个页面的性能问题:定位瓶颈、给优化方案与预期收益',
+    '写一份前端工程规范:目录结构、状态管理、请求封装、错误处理与提交约定'
+  ] },
+  { match: /后端|Java|开发工程师/, tasks: [
+    '设计 XX 模块的接口与数据结构:请求响应示例、错误码、幂等与并发处理',
+    '排查这个线上问题:可能原因排序、每条的验证命令、修复与回滚方案',
+    '写一份数据库变更方案:DDL、索引、兼容旧数据、灰度与回滚步骤'
+  ] },
+  { match: /测试|QA/, tasks: [
+    '为 XX 功能写测试用例:正常流、边界、异常、权限,标出优先级',
+    '整理一份上线前回归清单,按模块分组,每项写清预期结果与验证方式',
+    '复盘最近三个缺陷:根因分类、哪一环能提前拦住、补哪条用例'
+  ] },
+  { match: /运维|DevOps|SRE/, tasks: [
+    '写一份上线部署手册:配置全文、部署脚本、验证命令、回滚步骤',
+    '做一次容量评估:当前资源、瓶颈点、扩容阈值与成本估算',
+    '写一份故障复盘:时间线、根因、影响面、改进项与责任人'
+  ] },
+  { match: /数据/, tasks: [
+    '给这个业务设计指标口径:定义、计算方式、数据来源、谁负责维护',
+    '分析这份数据:关键结论三条、支撑证据、下一步建议',
+    '做一个周报模板:核心指标、环比、异常项与原因、下周动作'
+  ] },
+  { match: /内容|运营/, tasks: [
+    '写三版推广文案:分别面向决策者、使用者、同行,每版给标题与正文',
+    '做一个月的选题日历:主题、目标读者、发布渠道、转化目标',
+    '复盘上一篇内容的数据:哪里有效、哪里流失、下一篇怎么改'
+  ] },
+  { match: /市场|策划|品牌/, tasks: [
+    '做一次市场机会分析:规模、竞品、渠道、切入点与验证方式',
+    '写一份活动方案:目标、玩法、物料清单、预算、排期与效果衡量',
+    '整理品牌口径:一句话定位、三个支撑点、五个不能说错的表述'
+  ] },
+  { match: /销售/, tasks: [
+    '为这个客户做分档报价:服务范围、交付周期、付款节点,以及明确不包含什么',
+    '写一份投标技术方案,按评分办法逐条响应,不确定的资质标待确认',
+    '整理客户异议清单:常见五个反对意见,每个给应对话术与证据'
+  ] },
+  { match: /客户成功|客服/, tasks: [
+    '把这个客户投诉整理成工单:现象、影响、临时绕行方案、根因与整改',
+    '做一份客户健康度评估:使用情况、工单趋势、续约风险与动作',
+    '写一份交付后 30 天跟进计划:节点、检查项、对接人'
+  ] },
+  { match: /项目/, tasks: [
+    '把这次交付拆成里程碑:每个 milestone 的产出、验收人、时间与风险',
+    '做一次项目风险盘点:风险、概率、影响、应对与触发信号',
+    '写一份周会纪要模板:进展、卡点、需要谁做什么、下周目标'
+  ] },
+  { match: /人事|HR|招聘/, tasks: [
+    '为 XX 岗位写 JD:职责、硬性要求、加分项、薪资范围、汇报关系',
+    '设计这个岗位的面试评估表:可打分的维度、评分标准、追问方向',
+    '写一份前 30 天入职计划:周目标、带教人、检查点'
+  ] },
+  { match: /行政/, tasks: [
+    '做一份办公用品采购比价:规格、单价、发票类型、到货周期',
+    '写一份访客接待与视察准备清单:动线、点位、责任人、时间',
+    '整理固定资产台账模板:编号、使用人、位置、状态、盘点周期'
+  ] },
+  { match: /财务|会计/, tasks: [
+    '整理这季度的费用结构:主要科目、占比、异常项与建议',
+    '写一份项目成本核算口径:人力、外包、云资源如何归集与分摊',
+    '做一份发票与报销检查清单,按常见退回原因排序'
+  ] },
+  { match: /法务|合规/, tasks: [
+    '审这份合同:风险条款逐条列出、建议修改措辞、可让与不可让的底线',
+    '写一份数据处理与隐私说明,覆盖收集范围、用途、留存与第三方共享',
+    '整理这份协议里的责任边界:谁承担什么、违约怎么算、争议怎么解'
+  ] }
+]
+
+const DEFAULT_TASKS = [
+  '把你这个岗位最常做的三件事写成一份作业规范,新人照着就能干',
+  '复盘最近一次交付,列出三个最该改的问题和具体改法',
+  '做一份本岗位的检查清单,每项可直接勾选'
+]
+
+function quickFor(e) {
+  if (!e) return []
+  for (const r of ROLE_TASKS) {
+    if (r.match.test(e.name || '')) return r.tasks
+  }
+  return DEFAULT_TASKS
+}
+
+const quickTasks = computed(() => quickFor(emp.value))
+
 const levelText = computed(() => ({
   CEO: 'CEO · 统观全局', LEAD: '部门负责人', STAFF: '执行岗位'
 }[emp.value?.level] || '执行岗位'))
@@ -393,6 +506,14 @@ function brief(s) {
 
 .dispatch { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .dispatch-row { display: flex; gap: 10px; align-items: center; }
+.quick-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.quick-label { font-size: 10px; letter-spacing: .2em; color: var(--text-faint); margin-right: 2px; }
+.quick-chip {
+  font-family: var(--font-sans); font-size: 11px; color: var(--text-dim); cursor: pointer;
+  background: var(--tint-soft); border: 1px solid var(--border-hair); border-radius: 999px;
+  padding: 3px 10px; transition: color .25s var(--ease-quiet), border-color .25s var(--ease-quiet);
+}
+.quick-chip:hover { color: var(--glow-cyan); border-color: rgba(var(--rgb-glow), .35); }
 .ctx-select { flex: 1; }
 .send-btn { letter-spacing: .2em; }
 

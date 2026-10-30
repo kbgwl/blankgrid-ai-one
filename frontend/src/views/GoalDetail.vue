@@ -198,6 +198,9 @@
                       <span>{{ d.owner?.name || '未指定' }}</span>
                       <span v-if="d.outputType">{{ d.outputType }}</span>
                       <span v-if="d.attempts > 1">第 {{ d.attempts }} 次执行</span>
+                      <span v-if="verCount.get(d.id) > 1" class="d-vers" @click="openArtifact(artifactOf(d))">
+                        共 {{ verCount.get(d.id) }} 版
+                      </span>
                       <span v-if="depText(d)">依赖 {{ depText(d) }}</span>
                     </div>
                     <p class="d-notes" v-if="(d.status === 'BLOCKED' || d.status === 'WAITING') && d.reviewNotes">{{ d.reviewNotes }}</p>
@@ -369,6 +372,14 @@ function diffMotion(g) {
 const goal = computed(() => data.value?.goal || {})
 const streamList = computed(() => data.value?.workstreamList || [])
 const artifacts = computed(() => data.value?.artifactList || [])
+// 每条交付物已经产出过几版(返工一次就多一版)。有历史版本才显示,没返工过的不占位置。
+const verCount = computed(() => {
+  const m = new Map()
+  for (const a of artifacts.value) {
+    if (a.deliverableId) m.set(a.deliverableId, (m.get(a.deliverableId) || 0) + 1)
+  }
+  return m
+})
 const activities = computed(() => data.value?.activities || [])
 
 const pct = computed(() => {
@@ -931,6 +942,8 @@ onBeforeUnmount(() => {
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap;
 }
 .d-actions { flex: none; display: flex; gap: 2px; }
+.d-vers { color: var(--glow-cyan-dim); cursor: pointer; border-bottom: 1px dashed rgba(var(--rgb-glow), .35); }
+.d-vers:hover { color: var(--glow-cyan); }
 .d-art { color: var(--glow-cyan-dim); font-size: 11px; }
 .d-retry { color: var(--st-warn); font-size: 11px; }
 .stream-foot { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border-hair); }

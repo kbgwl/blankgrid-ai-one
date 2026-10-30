@@ -50,6 +50,9 @@
         <el-button v-if="canCancel" size="small" type="danger" plain @click="cancel">
           {{ detail.task.status === 'RUNNING' ? '中止任务' : '取消任务' }}
         </el-button>
+        <!-- 生产线上的任务不能在这里重派:它背后挂着交付物状态机,
+             绕过去会同时产出两份成果,评审和下游都会对不上。 -->
+        <span v-if="isEngineTask" class="engine-hint">生产线任务 · 重试请到项目页对该交付物操作</span>
       </footer>
     </div>
   </el-drawer>
@@ -84,7 +87,11 @@ const canCancel = computed(() =>
   detail.value && ['PENDING', 'RUNNING'].includes(detail.value.task.status))
 const canRedispatch = computed(() =>
   detail.value && ['FAILED', 'CANCELLED'].includes(detail.value.task.status)
-  && detail.value.task.employee && !detail.value.task.employee.ceo)
+  && detail.value.task.employee && !detail.value.task.employee.ceo
+  && !detail.value.task.deliverableId)
+
+// 属于某个交付物的任务(WORK/REVIEW)由目标引擎驱动,重试必须走交付物状态机
+const isEngineTask = computed(() => !!detail.value?.task?.deliverableId)
 
 const stream = ref('')
 const logsEl = ref(null)
@@ -247,7 +254,8 @@ async function jump(id) {
   transition: border-color .25s var(--ease-quiet), color .25s var(--ease-quiet);
 }
 .log-link:hover { border-bottom-style: solid; border-bottom-color: var(--glow-cyan); }
-footer.task-actions { text-align: right; display: flex; justify-content: flex-end; gap: 10px; }
+footer.task-actions { text-align: right; display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.engine-hint { margin-right: auto; font-size: 10.5px; color: var(--text-faint); letter-spacing: .06em; }
 
 /* 执行中:任务头部一条走不完的施工线,正文边出边滚 */
 .task-prog { margin-top: 12px; }
