@@ -183,6 +183,18 @@
       <el-divider direction="vertical" />
       <el-button text class="quiet-btn" @click="openAdd()">添一格</el-button>
       <el-divider direction="vertical" />
+      <!-- 导出的是每个岗位真正收到的指令原文:判断这套编制合不合理,得横着比 -->
+      <el-dropdown trigger="click" @command="exportManual">
+        <el-button text class="quiet-btn">说明书</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="md">Markdown</el-dropdown-item>
+            <el-dropdown-item command="docx">Word</el-dropdown-item>
+            <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-divider direction="vertical" />
       <el-button text class="quiet-btn" :loading="loading" @click="load">刷新</el-button>
     </div>
 
@@ -236,6 +248,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api, bus } from '../api'
 import { motionOk } from '../utils/motion'
 import GeoAvatar from '../components/GeoAvatar.vue'
@@ -517,6 +530,17 @@ function open(e) { selected.value = e; panelOpen.value = true }
 function openAdd(dept) { addPreset.value = dept ? dept.id : null; addOpen.value = true }
 
 /* 组织架构是这一页的唯一真数据源:取不到就明确告知,不能留一张空白图纸 */
+// 导出全岗位说明书。逐页点二十次看不出"职责有没有重叠、哪一环没人接",
+// 合成一份横着看才看得出来 —— 而这是调整编制时最先要看的东西。
+async function exportManual(format) {
+  try {
+    await api.exportManual(format)
+    ElMessage({ message: `说明书已导出(${format.toUpperCase()})`, type: 'success', plain: true })
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || '导出失败')
+  }
+}
+
 async function load() {
   loading.value = true
   try {

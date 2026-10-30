@@ -19,13 +19,112 @@ public class OrgController {
     private final DepartmentRepository deptRepo;
     private final EmployeeRepository empRepo;
     private final TaskRepository taskRepo;
+    private final com.blankgrid.aione.service.DocExportService docExport;
 
     public OrgController(OrgService orgService, DepartmentRepository deptRepo,
-                         EmployeeRepository empRepo, TaskRepository taskRepo) {
+                         EmployeeRepository empRepo, TaskRepository taskRepo,
+                         com.blankgrid.aione.service.DocExportService docExport) {
         this.orgService = orgService;
         this.deptRepo = deptRepo;
         this.empRepo = empRepo;
         this.taskRepo = taskRepo;
+        this.docExport = docExport;
+    }
+
+    /**
+     * 全岗位说明书导出 —— 一份文档看完这套编制到底被要求做什么。
+     *
+     * <p>单个岗位的说明书在组织页能看,但"这套设定合不合理"必须横着比:
+     * 谁负责什么、哪些职责重叠、哪个环节没人接。逐页点二十次看不出这些,
+     * 而这恰恰是调整编制时最先要看的东西。
+     *
+     * <p>导的是 systemPrompt 原文,不是简介 —— 简介会美化,原文才是它真正收到的指令。
+     */
+    @GetMapping("/manual")
+    public org.springframework.http.ResponseEntity<byte[]> manual(
+            @RequestParam(required = false) String format) {
+        String fmt = (format == null || format.isBlank()) ? "md" : format.trim().toLowerCase();
+        if (!com.blankgrid.aione.service.DocExportService.supports(fmt)) {
+            return org.springframework.http.ResponseEntity.badRequest().build();
+        }
+        try {
+            String md = buildManual();
+            byte[] body = "md".equals(fmt)
+                    ? md.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+                    : docExport.render("岗位说明书", md, fmt);
+            String name = "岗位说明书." + fmt;
+            return org.springframework.http.ResponseEntity.ok()
+                    .header("Content-Disposition",
+                            "attachment; filename=\"manual." + fmt + "\"; filename*=UTF-8''"
+                                    + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8)
+                                            .replace("+", "%20"))
+                    .contentType(org.springframework.http.MediaType.parseMediaType(
+                            com.blankgrid.aione.service.ExportService.contentType(fmt)))
+                    .body(body);
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.internalServerError().build();
+        }
+    }
+
+    private String buildManual() {
+        orgService.seedIfEmpty();
+        orgService.ensureHierarchy();
+        StringBuilder sb = new StringBuilder();
+        sb.append("# 岗位说明书 · 全部在编岗位\n\n");
+        sb.append("> 本文由系统当前配置导出。「职责」一节是该岗位真正收到的指令原文,不是简介 ——\n");
+        sb.append("> 判断一份说明书有没有用,看的是它能不能让人知道「什么算做完、什么不能做」。\n\n");
+
+        Employee ceo = orgService.ceos().stream().findFirst().orElse(null);
+        if (ceo != null) {
+            sb.append("## 管理层\n\n");
+            appendEmployee(sb, ceo);
+        }
+
+        for (Department d : orgService.departments()) {
+            sb.append("## ").append(d.getName()).append("\n\n");
+            for (Employee e : orgService.employeesOf(d.getId())) {
+                appendEmployee(sb, e);
+            }
+        }
+
+        // 没有部门的岗位最容易在调整编制时被漏掉,单独列出来
+        List<Employee> orphans = new ArrayList<>();
+        for (Employee e : empRepo.findAll()) {
+            if (e.getDepartmentId() == null && !e.isCeo()) orphans.add(e);
+        }
+        if (!orphans.isEmpty()) {
+            sb.append("## 未归属部门\n\n");
+            for (Employee e : orphans) appendEmployee(sb, e);
+        }
+
+        sb.append("\n---\n\n共 ").append(empRepo.count()).append(" 个岗位。\n");
+        return sb.toString();
+    }
+
+    private void appendEmployee(StringBuilder sb, Employee e) {
+        sb.append("### ").append(e.getName());
+        if (e.getTitle() != null && !e.getTitle().isBlank()) sb.append(" · ").append(e.getTitle());
+        sb.append("\n\n");
+
+        String level = switch (e.getLevel() == null ? "" : e.getLevel()) {
+            case Employee.LEVEL_CEO -> "负责人";
+            case Employee.LEVEL_LEAD -> "主管";
+            default -> "执行";
+        };
+        sb.append("- 层级:").append(level);
+        if (e.getManagerId() != null) {
+            empRepo.findById(e.getManagerId())
+                    .ifPresent(m -> sb.append(" · 汇报给 ").append(m.getName()));
+        }
+        if (e.getModel() != null && !e.getModel().isBlank()) sb.append(" · 模型 ").append(e.getModel());
+        sb.append("\n\n");
+
+        String prompt = e.getSystemPrompt();
+        if (prompt == null || prompt.isBlank()) {
+            sb.append("> 这个岗位还没有填写职责说明 —— 它现在只会按派活时的临时指令工作。\n\n");
+        } else {
+            sb.append("**职责说明**\n\n").append(prompt.trim()).append("\n\n");
+        }
     }
 
     /** 完整组织架构:CEO + 各部门及其岗位(附岗位任务统计) */

@@ -36,6 +36,11 @@ export const api = {
   createEmployee: (body) => http.post('/org/employees', body).then(r => r.data),
   updateEmployee: (id, body) => http.put(`/org/employees/${id}`, body).then(r => r.data),
   deleteEmployee: (id) => http.delete(`/org/employees/${id}`).then(r => r.data),
+  // 全岗位说明书:一份文档看完二十个岗位被要求做什么(原文,不是简介)
+  exportManual: async (format) => {
+    const r = await http.get('/org/manual', { params: { format }, responseType: 'blob', timeout: 90000 })
+    saveBlob(r.data, `空白格-岗位说明书.${format || 'md'}`)
+  },
   createDept: (body) => http.post('/org/departments', body).then(r => r.data),
   updateDept: (id, body) => http.put(`/org/departments/${id}`, body).then(r => r.data),
   deleteDept: (id) => http.delete(`/org/departments/${id}`).then(r => r.data),
