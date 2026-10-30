@@ -303,6 +303,10 @@ public class TaskService {
             String result = jsonTask
                     ? llm.chatStream(messages, task.getModel(), onDelta, null, true, EXEC_MAX_TOKENS)
                     : converse(messages, task, emp, onDelta, taskId);
+            // 评审任务要的是结构化 JSON,截断续写只会把 JSON 拼坏,宁可让它整份重来
+            if (!jsonTask) {
+                result = continueIfTruncated(messages, task, onDelta, taskId, result);
+            }
             tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
                     llm.tokensUsed(CeoLoopService.estimateTokens(promptChars + result.length())),
                     llm.lastModel()));
@@ -456,6 +460,141 @@ public class TaskService {
         p.put("taskId", taskId);
         p.put("tool", toolName);
         pusher.push("task-tool", p);
+    }
+
+    // ==================== 长交付物续写 ====================
+
+    /** 续写最多几段。到顶就停,宁可不完整也不能无限烧下去。 */
+    static final int MAX_CONTINUE_SEGMENTS = 4;
+    /** 续写后总字数上限。四万字已经远超任何一份正常交付物,再多就是模型在兜圈子。 */
+    static final int CONTINUE_MAX_CHARS = 40000;
+    /** 发回给模型的已写内容尾部长度。只要够它接上话,不需要看全文 —— 全文会让每段续写的成本翻倍。 */
+    static final int CONTINUE_TAIL_CHARS = 1200;
+
+    static final String CONTINUE_PROMPT = """
+            你的上一段输出到达单次输出上限被截断了,内容还没写完。
+            请**紧接最后一个字符继续写**:不要重写开头,不要总结前文,不要加「续上」「接上文」这类过渡语,
+            不要重复任何已经写过的内容。直接从下一个字符开始输出剩下的部分。
+            如果内容确实已经写完,只输出 [[DONE]] 这四个字符,不要输出别的东西。""";
+
+    /** 模型接话时爱加的废话前缀。留着会印在交付物中间,评审一眼就看出是拼出来的。 */
+    private static final String[] CONTINUE_NOISE = {
+            "（接上文）", "(接上文)", "（续）", "(续)", "（继续）", "(继续)",
+            "接上文：", "接上文:", "续上：", "续上:", "继续：", "继续:"
+    };
+
+    /**
+     * 交付物被输出上限截断时,自动接着写。
+     *
+     * <p>这是当前最烧钱也最致命的坑:8000 token 装不下一份整站代码或一份完整 PRD,
+     * 而模型不会报错,它会老老实实写一句「此处省略 5826 字」然后收尾 —— 评审看到的是残稿,
+     * 打回返工,再写一次还是截断。目标 #6 的官网就死在这个循环里:24 万 token,72 分,正文缺四节附录。
+     *
+     * <p>解法不是把上限调大(那是拿钱硬顶,而且总有更大的交付物),是让它接着写。
+     * 每段只回传尾部一小段,上下文不膨胀,所以续写的单价比首段还低。
+     */
+    private String continueIfTruncated(List<ChatMessage> messages, Task task,
+                                       java.util.function.Consumer<String> onDelta,
+                                       Long taskId, String first) {
+        if (first == null || first.isBlank() || !llm.lastTruncated()) return first;
+
+        StringBuilder all = new StringBuilder(first);
+        log.info("任务 {} 正文被截断({} 字),进入续写", taskId, all.length());
+
+        for (int seg = 1; seg <= MAX_CONTINUE_SEGMENTS; seg++) {
+            if (cancelled.contains(taskId)) throw new TaskCancelledException();
+            if (all.length() >= CONTINUE_MAX_CHARS) {
+                log.warn("任务 {} 续写达到 {} 字上限,停止", taskId, CONTINUE_MAX_CHARS);
+                break;
+            }
+            List<ChatMessage> cont = new ArrayList<>(messages);
+            cont.add(new ChatMessage("user", "【已写内容共 " + all.length() + " 字,以下是它的结尾】\n"
+                    + tail(all.toString(), CONTINUE_TAIL_CHARS) + "\n\n" + CONTINUE_PROMPT));
+
+            String more;
+            try {
+                more = llm.chatStream(cont, task.getModel(), onDelta, null, false, EXEC_MAX_TOKENS);
+            } catch (Exception ex) {
+                // 续写失败不能毁掉已有的半份成果:拿到多少算多少,评审至少还有东西看
+                log.warn("任务 {} 续写第 {} 段失败:{}", taskId, seg, ex.getMessage());
+                break;
+            }
+            // 每段单独记账。tokensUsed 只反映最后一次调用,不单独记就会把续写的钱算丢
+            tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(taskId, task.getGoalId(), "TASK",
+                    llm.tokensUsed(CeoLoopService.estimateTokens(more == null ? 0 : more.length())),
+                    llm.lastModel()));
+
+            if (more == null || more.isBlank()) break;
+            if (more.contains("[[DONE]]")) {
+                log.info("任务 {} 续写第 {} 段宣告写完", taskId, seg);
+                break;
+            }
+            int added = appendWithOverlap(all, more);
+            logRepo.save(new TaskLog(task, "info",
+                    "正文被输出上限截断,已自动续写第 " + seg + " 段(+" + added + " 字)"));
+            if (added <= 0) break;              // 没有新内容,再问也是重复
+            if (!llm.lastTruncated()) break;    // 这次写完了,不用再续
+        }
+        return all.toString();
+    }
+
+    /**
+     * 把续写内容接到已有内容后面,并去掉接缝处的重复。
+     *
+     * <p>模型被要求"接着写"时,十有八九会把上一段最后一句重抄一遍再往下走。
+     * 不去重,交付物中间就会出现一整段重复文字 —— 评审会当成模型在凑字数。
+     */
+    static int appendWithOverlap(StringBuilder all, String more) {
+        if (more == null || more.isEmpty()) return 0;
+        String add = stripContinueNoise(more);
+        if (add.isEmpty()) return 0;
+
+        String head = all.toString();
+        int probe = Math.min(160, head.length());
+        if (probe > 0) {
+            // 先试最严格的一种:接缝整段被原样重抄
+            String seam = head.substring(head.length() - probe);
+            int at = add.indexOf(seam);
+            if (at >= 0) {
+                String rest = add.substring(at + probe);
+                // 剩下那截如果本来就整段在原文里,说明模型只是把同一段又写了一遍。
+                // 不认这种情况,续写循环会一路空转到段数上限,白烧四轮钱。
+                if (!rest.isBlank() && head.contains(rest.strip())) return 0;
+                all.append(rest);
+                return rest.length();
+            }
+            // 再退一步:找最长的一截「我结尾 = 你开头」。
+            // 下限取 6 字:中文一个短句就是这个长度,再严就会漏掉最常见的"重抄半句";
+            // 上限卡在续写内容的一半,避免一口气把整段都当成重复剪光。
+            int max = Math.min(200, Math.min(head.length(), Math.max(6, add.length() / 2)));
+            for (int k = max; k >= 6; k--) {
+                if (head.regionMatches(head.length() - k, add, 0, k)) {
+                    String rest = add.substring(k);
+                    if (!rest.isBlank() && head.contains(rest.strip())) return 0;
+                    all.append(rest);
+                    return rest.length();
+                }
+            }
+        }
+        all.append(add);
+        return add.length();
+    }
+
+    private static String stripContinueNoise(String s) {
+        String t = s.stripLeading();
+        for (String noise : CONTINUE_NOISE) {
+            if (t.startsWith(noise)) {
+                t = t.substring(noise.length()).stripLeading();
+                break;
+            }
+        }
+        return t;
+    }
+
+    /** 取尾部若干字。续写只需要看到"话说到哪儿了",不需要看全文。 */
+    static String tail(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(s.length() - max);
     }
 
     /** 连续失败熔断:同岗位连续 3 次失败自动叫停,上报创始人 */
