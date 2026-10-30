@@ -17,12 +17,15 @@ public class OpsController {
     private final ActivityRepository activityRepo;
     private final CeoLoopService ceoLoop;
     private final com.blankgrid.aione.service.BackupService backupService;
+    private final com.blankgrid.aione.repo.DecisionTraceRepository traceRepo;
 
     public OpsController(ActivityRepository activityRepo, CeoLoopService ceoLoop,
-                         com.blankgrid.aione.service.BackupService backupService) {
+                         com.blankgrid.aione.service.BackupService backupService,
+                         com.blankgrid.aione.repo.DecisionTraceRepository traceRepo) {
         this.activityRepo = activityRepo;
         this.ceoLoop = ceoLoop;
         this.backupService = backupService;
+        this.traceRepo = traceRepo;
     }
 
     @GetMapping("/feed")
@@ -33,6 +36,42 @@ public class OpsController {
         m.put("ceoRunning", ceoLoop.isRunning());
         m.put("cycleCount", ceoLoop.cycleCount());
         return m;
+    }
+
+    /**
+     * 决策档案列表:最近几轮 CEO 巡视"查了什么、申请了什么、怎么拍的板"。
+     *
+     * <p>列表<b>不带</b>证据原文 —— 一条可能几万字,几十条一起返回会把页面拖死。
+     * 想看全文点进详情。
+     */
+    @GetMapping("/traces")
+    public List<Map<String, Object>> traces(@RequestParam(required = false, defaultValue = "30") int limit) {
+        int cap = Math.max(1, Math.min(50, limit));
+        List<Map<String, Object>> out = new java.util.ArrayList<>();
+        for (com.blankgrid.aione.entity.DecisionTrace t : traceRepo.findTop50ByOrderByIdDesc()) {
+            if (out.size() >= cap) break;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", t.getId());
+            m.put("cycleNo", t.getCycleNo());
+            m.put("kind", t.getKind());
+            m.put("model", t.getModel());
+            m.put("summary", t.getSummary());
+            m.put("toolNames", t.getToolNames());
+            m.put("approvalsRequested", t.getApprovalsRequested());
+            m.put("tokens", t.getTokens());
+            m.put("evidenceChars", t.getEvidence() == null ? 0 : t.getEvidence().length());
+            m.put("createdAt", t.getCreatedAt());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 单轮决策全文:证据原文 + 决策 JSON。追问"它凭什么这么定"从这里开始。 */
+    @GetMapping("/traces/{id}")
+    public org.springframework.http.ResponseEntity<?> trace(@PathVariable Long id) {
+        return traceRepo.findById(id)
+                .<org.springframework.http.ResponseEntity<?>>map(org.springframework.http.ResponseEntity::ok)
+                .orElseGet(() -> org.springframework.http.ResponseEntity.notFound().build());
     }
 
     public static class ItemBody {

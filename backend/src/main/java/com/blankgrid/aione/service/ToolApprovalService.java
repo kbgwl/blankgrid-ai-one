@@ -36,6 +36,7 @@ public class ToolApprovalService {
     private final ToolRegistry tools;
     private final ActivityRepository activityRepo;
     private final EventPusher pusher;
+    private final SettingsService settings;
 
     /** 单线程就够:审批是人点出来的,不会并发,而且串行能避免同时开一堆外部进程 */
     private final ExecutorService runner = Executors.newSingleThreadExecutor(r -> {
@@ -45,11 +46,13 @@ public class ToolApprovalService {
     });
 
     public ToolApprovalService(ToolApprovalRepository repo, ToolRegistry tools,
-                               ActivityRepository activityRepo, EventPusher pusher) {
+                               ActivityRepository activityRepo, EventPusher pusher,
+                               SettingsService settings) {
         this.repo = repo;
         this.tools = tools;
         this.activityRepo = activityRepo;
         this.pusher = pusher;
+        this.settings = settings;
     }
 
     public List<ToolApproval> pending() {
@@ -108,17 +111,80 @@ public class ToolApprovalService {
     }
 
     public Map<String, Object> reject(Long id) {
+        return reject(id, "");
+    }
+
+    /** 拒绝时可以带一句理由 —— 它会被写进公司动态,模型下一轮能看到"为什么不行"。 */
+    public Map<String, Object> reject(Long id, String reason) {
         ToolApproval a = repo.findById(id).orElse(null);
         if (a == null) return Map.of("ok", false, "message", "审批单不存在");
         if (!ToolApproval.PENDING.equals(a.getStatus())) {
             return Map.of("ok", false, "message", "这张单已经是 " + a.getStatus());
         }
+        String why = reason == null ? "" : reason.trim();
         a.setStatus(ToolApproval.REJECTED);
         a.setDecidedAt(Instant.now());
-        a.setResult("创始人拒绝");
+        a.setResult(why.isBlank() ? "创始人拒绝" : "创始人拒绝:" + why);
         repo.save(a);
+        if (!why.isBlank()) {
+            try {
+                activityRepo.save(new Activity(Activity.REPORT,
+                        "【工具申请被拒】" + a.getToolName() + "(由 " + nz(a.getActor()) + " 发起):" + clip(why, 300),
+                        null));
+            } catch (Exception e) {
+                log.warn("拒绝理由写动态失败:{}", e.getMessage());
+            }
+        }
         pushCount();
         return Map.of("ok", true, "message", "已拒绝;模型下次不会再拿到这个结果,会改用其他方式");
+    }
+
+    /**
+     * 批量批准。逐条走 {@link #approve},不是另写一条捷径 ——
+     * 单条的校验(状态、重放、写动态)必须和批量完全一致,否则迟早出现
+     * "单独点能执行、批量点没反应"。
+     */
+    public Map<String, Object> batchApprove(List<Long> ids) {
+        int ok = 0;
+        List<Map<String, Object>> skipped = new java.util.ArrayList<>();
+        for (Long id : ids == null ? List.<Long>of() : ids) {
+            Map<String, Object> r = approve(id);
+            if (Boolean.TRUE.equals(r.get("ok"))) ok++;
+            else skipped.add(Map.of("id", id, "message", String.valueOf(r.get("message"))));
+        }
+        return Map.of("ok", true, "approved", ok, "skipped", skipped,
+                "message", "已批准 " + ok + " 条" + (skipped.isEmpty() ? "" : "," + skipped.size() + " 条跳过"));
+    }
+
+    /**
+     * 过期清理:等太久的待批单自动作废。
+     *
+     * <p>没有这一步,定时巡视会把列表堆成垃圾场 —— 模型每轮看到"上次没查成",
+     * 换个参数再申请一次;一周后真正要紧的那条反而被埋在几十条询价单底下。
+     *
+     * <p>不删除,只标 EXPIRED:历史仍然可查,不然"这条到底批没批过"永远说不清。
+     */
+    @org.springframework.scheduling.annotation.Scheduled(initialDelay = 120000, fixedDelay = 900000)
+    public void expireStale() {
+        try {
+            Instant before = Instant.now().minusSeconds(settings.approvalTtlHours() * 3600L);
+            List<ToolApproval> stale = repo.findByStatusAndCreatedAtBefore(ToolApproval.PENDING, before);
+            if (stale.isEmpty()) return;
+            for (ToolApproval a : stale) {
+                a.setStatus(ToolApproval.EXPIRED);
+                a.setDecidedAt(Instant.now());
+                a.setResult("超过 " + settings.approvalTtlHours() + " 小时未处理,自动作废");
+                repo.save(a);
+            }
+            log.info("待批工具调用过期清理:{} 条", stale.size());
+            pushCount();
+        } catch (Exception e) {
+            log.warn("过期清理失败:{}", e.getMessage());
+        }
+    }
+
+    private static String nz(String s) {
+        return s == null || s.isBlank() ? "未知岗位" : s;
     }
 
     private void pushCount() {

@@ -60,14 +60,24 @@ export const api = {
   // 工具自主调用:清单(带当前策略)、待批调用、批准/拒绝、REA 自检
   toolsList: () => http.get('/tools').then(r => r.data),
   toolApprovals: (scope) => http.get('/tools/approvals', { params: { scope: scope || 'pending' } }).then(r => r.data),
+  // 导航角标每 30 秒问一次这个,不要为了一个数字拉整张列表
+  toolApprovalCount: () => http.get('/tools/approvals/count').then(r => r.data),
   approveTool: (id) => http.post(`/tools/approvals/${id}/approve`).then(r => r.data),
+  batchApproveTools: (ids) => http.post('/tools/approvals/batch-approve', { ids }).then(r => r.data),
   rejectTool: (id) => http.post(`/tools/approvals/${id}/reject`).then(r => r.data),
+  // 拒绝带理由:理由会进公司动态,模型下一轮才知道"为什么不行"
+  rejectToolWithReason: (id, reason) => http.post(`/tools/approvals/${id}/reject`, { reason }).then(r => r.data),
+  // 工具调用审计:谁调的、花了多久、成没成
+  toolCalls: (hours) => http.get('/tools/calls', { params: hours ? { hours } : {} }).then(r => r.data),
   // REA 自检要真起一次外部进程,npx 首次还要下载包,给足 3 分钟
   reaTest: () => http.post('/tools/rea/test', {}, { timeout: 180000 }).then(r => r.data),
   // 电商联盟连通性:真去搜一条,比"保存成功"有用 —— 密钥错/没备案都是保存时不报错、干活才 403
   ecomTest: () => http.post('/settings/ecom/test', {}, { timeout: 60000 }).then(r => r.data),
 
   opsFeed: () => http.get('/ops/feed').then(r => r.data),
+  // 决策档案:CEO 每轮巡视"查了什么、怎么拍的板"。列表不带证据原文,详情才带
+  opsTraces: (limit) => http.get('/ops/traces', { params: limit ? { limit } : {} }).then(r => r.data),
+  opsTrace: (id) => http.get(`/ops/traces/${id}`, { timeout: 20000 }).then(r => r.data),
   setGoal: (content) => http.post('/ops/goal', { content }).then(r => r.data),
   setFeedback: (content) => http.post('/ops/feedback', { content }).then(r => r.data),
   ackActivity: (id) => http.post(`/ops/${id}/ack`).then(r => r.data),

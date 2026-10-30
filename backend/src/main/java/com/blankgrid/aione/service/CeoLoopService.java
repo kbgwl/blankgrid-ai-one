@@ -58,6 +58,7 @@ public class CeoLoopService {
     private final LlmService llm;
     private final SettingsService settings;
     private final com.blankgrid.aione.tool.ToolRegistry toolRegistry;
+    private final com.blankgrid.aione.repo.DecisionTraceRepository traceRepo;
     private final EventPusher pusher;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -74,7 +75,8 @@ public class CeoLoopService {
                           DeliverableRepository delRepo, GoalService goalService,
                           TaskService taskService, LlmService llm,
                           SettingsService settings, EventPusher pusher,
-                          com.blankgrid.aione.tool.ToolRegistry toolRegistry) {
+                          com.blankgrid.aione.tool.ToolRegistry toolRegistry,
+                          com.blankgrid.aione.repo.DecisionTraceRepository traceRepo) {
         this.empRepo = empRepo;
         this.taskRepo = taskRepo;
         this.activityRepo = activityRepo;
@@ -88,6 +90,7 @@ public class CeoLoopService {
         this.settings = settings;
         this.pusher = pusher;
         this.toolRegistry = toolRegistry;
+        this.traceRepo = traceRepo;
     }
 
     /** 心跳:按设置里的频率触发自动巡视(间隔可随时在设置页调整) */
@@ -169,7 +172,7 @@ public class CeoLoopService {
         long cycleNo = cycleCounter.incrementAndGet();
         pushCeoStatus("RUNNING");
         try {
-            String reply = askCeo(weekly);
+            String reply = askCeo(weekly, cycleNo);
             String summary = executeDecisions(reply, cycleNo);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("ok", true);
@@ -191,7 +194,7 @@ public class CeoLoopService {
     }
 
     /** 组装公司上下文,让 CEO 决策。weekly=true 时附带 7 天汇报摘要,要求输出周报。 */
-    private String askCeo(boolean weekly) {
+    private String askCeo(boolean weekly, long cycleNo) {
         Employee ceo = empRepo.findByCeoTrue().stream().findFirst().orElse(null);
         String sys = (ceo != null && ceo.getSystemPrompt() != null && !ceo.getSystemPrompt().isBlank())
                 ? ceo.getSystemPrompt()
@@ -277,9 +280,9 @@ public class CeoLoopService {
         // 拍板前先取证。下面这份上下文是"快照",快照会过期、会缺细节(比如现价、成本、
         // 某个竞品到底怎么实现)。让 CEO 自己把不确定的部分查清楚再决策,
         // 比让它对着一段可能过期的摘要凭印象拍板强 —— 这也正是"自主决策"和"按剧本执行"的区别。
-        String evidence = investigate(sys, sb.toString());
-        if (!evidence.isBlank()) {
-            sb.append("\n【你本轮自己查到的证据(工具调用结果,优先于上面的摘要)】\n").append(evidence).append("\n");
+        Evidence evidence = investigate(sys, sb.toString());
+        if (!evidence.text().isBlank()) {
+            sb.append("\n【你本轮自己查到的证据(工具调用结果,优先于上面的摘要)】\n").append(evidence.text()).append("\n");
         }
 
         sb.append("\n【你的输出要求】只输出一个 JSON 对象,不要输出任何其他文字:\n");
@@ -322,27 +325,44 @@ public class CeoLoopService {
                 : llm.chatStream(messages, cycleModel, null, settings.decisionProvider(), false, PLAN_TOKENS);
         tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(null, (Long) null, "CEO",
                 llm.tokensUsed(estimateTokens(sb.length() + sys.length() + reply.length())), llm.lastModel()));
+        // 归档这一轮:查了什么、申请了什么、最后怎么拍的板
+        saveTrace(cycleNo, cycleModel, evidence, reply);
         return reply;
+    }
+
+    /** 一次取证的结果:原文 + 用了哪些工具 + 申请了几条待批 */
+    record Evidence(String text, java.util.Set<String> tools, int approvals, long chars) {
+        static Evidence none() { return new Evidence("", java.util.Set.of(), 0, 0); }
     }
 
     /**
      * 取证阶段:CEO 在拍板前自己调工具查证据,最多 {@code ceoToolRounds} 轮。
      *
-     * <p>只给 {@link com.blankgrid.aione.tool.ToolRegistry#decisionTools()} 里的工具 ——
-     * 也就是"只读、查证"这一类。派活、返工、归档这些改状态的动作不允许在取证阶段发生,
-     * 它们必须变成 decisions 里的一条,由系统执行并留审计。这条线一松,
-     * 事后就分不清"CEO 查了什么"和"CEO 做了什么"。
+     * <p>工具清单来自 {@link com.blankgrid.aione.tool.ToolRegistry#decisionTools()},但它现在
+     * 不再只含"只读 + 全自动"的那几个 —— 需要批准的也在里面。区别在执行路径:
+     * 走 {@link com.blankgrid.aione.tool.ToolRegistry#invokeForDecision},只读的按策略走,
+     * 有副作用的一律只落待批单。
+     *
+     * <p>这条改动解决的是"申请不到"的问题:以前 CEO 的视野里根本没有 REA 这类工具,
+     * 它永远不会说出"我要逆向分析这个包,请批准"。需要授权的动作只能靠岗位在任务里
+     * 偶然撞上 —— 那不是自主决策,是被动触发。
      *
      * <p>任何一轮出错都只是少一份证据,不能连累整轮巡视 —— 拍板本身仍然要发生。
      */
-    private String investigate(String sys, String context) {
+    private Evidence investigate(String sys, String context) {
         List<com.blankgrid.aione.tool.AiTool> usable = toolRegistry.decisionTools();
         int rounds = settings.ceoToolRounds();
-        if (usable.isEmpty() || rounds <= 0) return "";
+        if (usable.isEmpty() || rounds <= 0) return Evidence.none();
 
         List<LlmService.ToolSpec> specs = new ArrayList<>();
+        StringBuilder catalog = new StringBuilder();
         for (com.blankgrid.aione.tool.AiTool t : usable) {
             specs.add(new LlmService.ToolSpec(t.name(), t.description(), t.paramsSchema()));
+            boolean needApproval = !t.decisionSafe()
+                    || SettingsService.POLICY_CONFIRM.equals(toolRegistry.policyOf(t));
+            catalog.append("\n- ").append(t.name())
+                    .append(needApproval ? " [需创始人批准]" : " [可直接用]")
+                    .append(":").append(clip(t.description(), 80));
         }
 
         List<ChatMessage> msgs = new ArrayList<>();
@@ -351,13 +371,18 @@ public class CeoLoopService {
                 + "\n\n【拍板前先取证】你是 CEO,上面是公司现状的快照。快照会过期、会缺细节。"
                 + "凡是影响本轮决策又拿不准的事实(现价、成本、某个软件/竞品到底怎么实现、某个数算得对不对),"
                 + "先用工具查清楚再拍板。只查真正影响决策的,别为了查而查。"
-                + "查够了就直接给结论,不要输出 JSON —— 下一步会单独要你的决策。\n"
-                + "可用工具:" + String.join("、", specs.stream().map(LlmService.ToolSpec::name).toList())));
+                + "\n标着「需创始人批准」的工具你也可以调:系统会把它变成一张待批单并给你单号,这不等于失败。"
+                + "如果这项事实确实影响判断,就申请,并在调用前的说明里写清为什么要它;"
+                + "申请之后不要换个参数反复重来,一件事只申请一次。"
+                + "\n查够了就直接给结论,不要输出 JSON —— 下一步会单独要你的决策。"
+                + "\n\n可用工具:" + catalog));
 
         StringBuilder ev = new StringBuilder();
+        java.util.Set<String> usedTools = new java.util.LinkedHashSet<>();
         String model = settings.decisionModel(null);
         boolean strong = settings.decisionStrong();
         int used = 0;
+        int approvalsRequested = 0;
         for (int i = 0; i < rounds; i++) {
             LlmService.Turn turn;
             try {
@@ -379,16 +404,50 @@ public class CeoLoopService {
             }
             msgs.add(new ChatMessage("assistant", turn.content(), turn.toolCalls(), null, null));
             for (LlmService.ToolCall tc : turn.toolCalls()) {
-                String out = toolRegistry.invoke(tc.name(), tc.arguments(),
+                String out = toolRegistry.invokeForDecision(tc.name(), tc.arguments(),
                         new com.blankgrid.aione.tool.ToolContext(null, null, "CEO"), turn.content());
+                usedTools.add(tc.name());
+                if (out != null && out.contains("已提交审批单")) approvalsRequested++;
                 msgs.add(ChatMessage.toolResult(tc.id(), tc.name(), out));
                 ev.append("- ").append(tc.name()).append(" (").append(clip(tc.arguments(), 200)).append(")\n  ")
                   .append(clip(out, 1500)).append("\n");
             }
         }
-        if (used > 0) log.info("CEO 取证完成:工具 {} 个,上下文约 {} 字",
-                usable.size(), used);
-        return ev.toString();
+        if (used > 0) {
+            log.info("CEO 取证完成:工具 {} 个,上下文约 {} 字,申请待批 {} 条",
+                    usedTools.size(), used, approvalsRequested);
+        }
+        return new Evidence(ev.toString(), usedTools, approvalsRequested, used);
+    }
+
+    /**
+     * 把这一轮的取证与决策原文存下来。
+     *
+     * <p>不存的话,"它凭什么这么决定"只能靠猜 —— 创始人要么全信要么全不信,
+     * 而这恰恰是最该能追问的一步。写失败只记日志,不能因为归档问题让巡视失败。
+     */
+    private void saveTrace(long cycleNo, String model, Evidence ev, String reply) {
+        if (traceRepo == null) return;
+        if (ev.text().isBlank() && (reply == null || reply.isBlank())) return;
+        try {
+            com.blankgrid.aione.entity.DecisionTrace t =
+                    new com.blankgrid.aione.entity.DecisionTrace(cycleNo,
+                            com.blankgrid.aione.entity.DecisionTrace.KIND_CYCLE, model);
+            t.setEvidence(clip(ev.text(), 60000));
+            t.setDecisionJson(clip(reply, 60000));
+            t.setToolNames(String.join(",", ev.tools()));
+            t.setApprovalsRequested(ev.approvals());
+            t.setTokens(estimateTokens((int) Math.min(3_000_000L,
+                    ev.chars() + (reply == null ? 0 : reply.length()))));
+            try {
+                t.setSummary(clip(mapper.readTree(extractJson(reply)).path("summary").asText(""), 900));
+            } catch (Exception ignored) {
+                t.setSummary(clip(reply, 900));
+            }
+            traceRepo.save(t);
+        } catch (Exception e) {
+            log.warn("决策档案写入失败:{}", e.getMessage());
+        }
     }
 
     /** 解析并执行 CEO 决策 */

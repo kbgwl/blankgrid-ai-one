@@ -31,6 +31,11 @@
         <router-link to="/org" class="nav-link">组织</router-link>
         <router-link to="/board" class="nav-link">看板</router-link>
         <router-link to="/artifacts" class="nav-link">成果</router-link>
+        <router-link to="/approvals" class="nav-link">
+          自主
+          <!-- 待批单是岗位在后台任务里产生的,不点进设置页就永远看不见,所以角标挂在导航上 -->
+          <i v-if="pendingApprovals > 0" class="nav-badge">{{ pendingApprovals }}</i>
+        </router-link>
         <router-link to="/settings" class="nav-link">设置</router-link>
       </nav>
       <button class="play-btn" :class="{ busy: rpBusy }" :disabled="!replayReady"
@@ -94,6 +99,7 @@ const activeEmployees = ref(0)
 // 账户欠费时后端会停掉调度,这里把原因顶在页面最上面 —— 否则看起来像"系统不动了"
 const llmBlocked = ref(false)
 const llmMessage = ref('')
+const pendingApprovals = ref(0)
 const clock = ref('')
 const theme = ref(document.documentElement.dataset.theme === 'paper' ? 'paper' : 'ink')
 const rpBusy = ref(false)
@@ -131,6 +137,11 @@ async function loadTopStats() {
     llmBlocked.value = !!s.llmBlocked
     llmMessage.value = s.llmMessage || ''
   } catch (e) { /* 口令未过时静默,登录框会负责提醒 */ }
+  // 待批数单独问:它变化得比统计频繁,而且只有这个数字要出现在导航上
+  try {
+    const c = await api.toolApprovalCount()
+    pendingApprovals.value = c.pending || 0
+  } catch (e) { /* 忽略 */ }
 }
 function tickClock() {
   const d = new Date()
@@ -145,6 +156,8 @@ onMounted(async () => {
     if (evt.type === 'ui-replay-state') { rpBusy.value = !!evt.busy; rpLabel.value = evt.label || '' }
   })
   offStatus = bus.on(evt => {
+    // 审批状态一变就立刻刷角标,别等 30 秒轮询
+    if (evt.type === 'tool-approval') pendingApprovals.value = evt.pending || 0
     if (['task-update', 'goal-update', 'goal-completed', 'employee-status', 'ceo-cycle'].includes(evt.type)) {
       clearTimeout(statsTimer)
       statsTimer = setTimeout(loadTopStats, 420)
@@ -263,6 +276,14 @@ async function doLogin() {
   text-shadow: 0 0 14px rgba(var(--rgb-glow), .35);
 }
 .nav-link.router-link-active::after { width: 26px; }
+/* 待批角标:它不是装饰,是"有东西在等你点头"的唯一提示 */
+.nav-badge {
+  position: absolute; top: 1px; right: 3px; font-style: normal;
+  font-family: var(--font-mono); font-size: 9.5px; line-height: 1;
+  padding: 2px 4px; border-radius: 7px; letter-spacing: 0;
+  background: rgba(var(--rgb-warn), .92); color: #1a1206;
+  box-shadow: 0 0 10px rgba(var(--rgb-warn), .45);
+}
 .corp {
   margin-left: 18px; display: flex; align-items: center; gap: 9px; white-space: nowrap;
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--text-faint);

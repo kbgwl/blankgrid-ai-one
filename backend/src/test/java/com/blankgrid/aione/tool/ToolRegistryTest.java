@@ -34,6 +34,7 @@ class ToolRegistryTest {
 
     private SettingsService settings;
     private ToolApprovalRepository approvals;
+    private com.blankgrid.aione.repo.ToolCallLogRepository calls;
 
     /** 记录执行次数:策略拦截的判据是"根本没执行",不是"返回了错误文案" */
     static class CountingTool implements AiTool {
@@ -69,10 +70,11 @@ class ToolRegistryTest {
         approvals = mock(ToolApprovalRepository.class);
         when(approvals.existsByToolNameAndArgsJsonAndStatus(anyString(), anyString(), anyString())).thenReturn(false);
         when(approvals.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        calls = mock(com.blankgrid.aione.repo.ToolCallLogRepository.class);
     }
 
     private ToolRegistry registry(AiTool... tools) {
-        return new ToolRegistry(List.of(tools), settings, approvals);
+        return new ToolRegistry(List.of(tools), settings, approvals, calls);
     }
 
     private void policy(Map<String, String> map) {
@@ -148,17 +150,80 @@ class ToolRegistryTest {
     }
 
     @Test
-    @DisplayName("决策层只看到:可用 + 决策安全 + 全自动")
-    void decisionToolsFiltered() {
+    @DisplayName("决策层能看到「需批准」的工具,否则它连申请都发不出来")
+    void decisionSeesEverythingUsable() {
         CountingTool ok = new CountingTool("d_ok", true, true, "auto");
-        CountingTool notSafe = new CountingTool("d_write", true, false, "auto");
+        CountingTool write = new CountingTool("d_write", true, false, "auto");
         CountingTool notAvailable = new CountingTool("d_na", false, true, "auto");
         CountingTool needsApproval = new CountingTool("d_confirm", true, true, "confirm");
-        ToolRegistry r = registry(ok, notSafe, notAvailable, needsApproval);
+        CountingTool closed = new CountingTool("d_off", true, true, "off");
+        ToolRegistry r = registry(ok, write, notAvailable, needsApproval, closed);
 
         List<String> names = r.decisionTools().stream().map(AiTool::name).toList();
-        assertEquals(List.of("d_ok"), names,
-                "写操作、不可用、需批准的一律不进决策层 —— 人不在场,拿到也只能干等");
+        assertEquals(List.of("d_ok", "d_write", "d_confirm"), names,
+                "不可用的和已关闭的不该出现;需批准、有副作用的必须出现 —— 看不见就申请不了,"
+                        + "需要授权的动作就只能靠岗位偶然撞上,那不是自主决策");
+    }
+
+    @Test
+    @DisplayName("决策层申请需批准的工具:落单,但不执行")
+    void decisionQueuesConfirmTool() {
+        CountingTool t = new CountingTool("d_rev", true, true, "confirm");
+        ToolRegistry r = registry(t);
+
+        String out = r.invokeForDecision("d_rev", "{\"action\":\"doctor\"}", ToolContext.empty(), "要拆这个包");
+
+        assertEquals(0, t.calls.get(), "申请 ≠ 执行");
+        assertTrue(out.contains("已提交审批单"), out);
+        ArgumentCaptor<ToolApproval> cap = ArgumentCaptor.forClass(ToolApproval.class);
+        verify(approvals).save(cap.capture());
+        assertEquals("要拆这个包", cap.getValue().getReason(),
+                "申请理由必须留下,否则审批人只看到一行参数,不知道该不该批");
+        assertEquals("{\"action\":\"doctor\"}", cap.getValue().getArgsJson(),
+                "批准时要按原参数重放,参数不能丢");
+    }
+
+    @Test
+    @DisplayName("决策层不能直接执行有副作用的工具,哪怕它被设成了 auto")
+    void decisionCannotWriteEvenWhenAuto() {
+        CountingTool w = new CountingTool("d_write", true, false, "auto");
+        ToolRegistry r = registry(w);
+
+        String out = r.invokeForDecision("d_write", "{}", ToolContext.empty(), "顺手改一下");
+
+        assertEquals(0, w.calls.get(),
+                "在「取证」这个名义下改状态,事后翻记录只会看到「CEO 查了一下」,实际它已经动了东西");
+        assertTrue(out.contains("需创始人批准"), out);
+    }
+
+    @Test
+    @DisplayName("决策层调只读工具照常执行,并留审计")
+    void decisionReadRunsAndIsAudited() {
+        CountingTool t = new CountingTool("d_read", true, true, "auto");
+        ToolRegistry r = registry(t);
+
+        assertEquals("执行了", r.invokeForDecision("d_read", "{}", ToolContext.empty(), ""));
+        assertEquals(1, t.calls.get());
+
+        ArgumentCaptor<com.blankgrid.aione.entity.ToolCallLog> cap =
+                ArgumentCaptor.forClass(com.blankgrid.aione.entity.ToolCallLog.class);
+        verify(calls).save(cap.capture());
+        com.blankgrid.aione.entity.ToolCallLog log = cap.getValue();
+        assertEquals("d_read", log.getToolName());
+        assertEquals(com.blankgrid.aione.entity.ToolCallLog.SOURCE_DECISION, log.getSource());
+        assertTrue(log.isOk());
+        assertTrue(log.getResultPreview().contains("执行了"));
+    }
+
+    @Test
+    @DisplayName("审计写失败不能把成功的工具调用变成失败")
+    void auditFailureIsSwallowed() {
+        CountingTool t = new CountingTool("d_x", true, true, "auto");
+        when(calls.save(any())).thenThrow(new RuntimeException("磁盘满了"));
+        ToolRegistry r = registry(t);
+
+        assertEquals("执行了", r.invoke("d_x", "{}", ToolContext.empty()),
+                "审计是旁路:记账出问题不该拖垮业务");
     }
 
     @Test

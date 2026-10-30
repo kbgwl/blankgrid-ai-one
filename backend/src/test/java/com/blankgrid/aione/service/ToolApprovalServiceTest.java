@@ -41,6 +41,7 @@ class ToolApprovalServiceTest {
     private ActivityRepository activityRepo;
     private ToolRegistry tools;
     private ToolApprovalService svc;
+    private SettingsService settings;
 
     /** 真实实例:approve 后靠它记录"到底执行了没有" */
     static class EchoTool implements AiTool {
@@ -61,13 +62,13 @@ class ToolApprovalServiceTest {
 
     @BeforeEach
     void setUp() {
-        SettingsService settings = new SettingsService(tempDir.toString());
+        settings = new SettingsService(tempDir.toString());
         repo = mock(ToolApprovalRepository.class);
         activityRepo = mock(ActivityRepository.class);
         EventPusher pusher = mock(EventPusher.class);
         echo = new EchoTool();
-        tools = new ToolRegistry(List.of(echo), settings, repo);
-        svc = new ToolApprovalService(repo, tools, activityRepo, pusher);
+        tools = new ToolRegistry(List.of(echo), settings, repo, mock(com.blankgrid.aione.repo.ToolCallLogRepository.class));
+        svc = new ToolApprovalService(repo, tools, activityRepo, pusher, settings);
     }
 
     /** 让 findById 拿到的永远是同一个对象,save 就是更新它 —— 贴近 JPA 的真实行为 */
@@ -161,8 +162,8 @@ class ToolApprovalServiceTest {
                 throw new IllegalStateException("外部接口 500");
             }
         };
-        ToolRegistry reg = new ToolRegistry(List.of(broken), settings, repo);
-        ToolApprovalService s = new ToolApprovalService(repo, reg, activityRepo, mock(EventPusher.class));
+        ToolRegistry reg = new ToolRegistry(List.of(broken), settings, repo, mock(com.blankgrid.aione.repo.ToolCallLogRepository.class));
+        ToolApprovalService s = new ToolApprovalService(repo, reg, activityRepo, mock(EventPusher.class), settings);
         ToolApproval a = new ToolApproval("broken", "test", "{}", "", null, null, "CEO");
         try {
             var f = ToolApproval.class.getDeclaredField("id");
@@ -183,5 +184,55 @@ class ToolApprovalServiceTest {
         assertTrue(a.getResult().contains("500"), a.getResult());
         verify(repo, atLeast(1)).save(any());
         verify(activityRepo, timeout(2000)).save(any());
+    }
+
+    @Test
+    @DisplayName("等太久的待批单自动作废,但不删除 —— 历史要能查")
+    void staleApprovalsExpire() {
+        ToolApproval old = pending(10L, "echo", "{\"old\":1}");
+        old.setCreatedAt(java.time.Instant.now().minusSeconds(48 * 3600));
+        ToolApproval fresh = pending(11L, "echo", "{\"new\":1}");
+        when(repo.findByStatusAndCreatedAtBefore(eq(ToolApproval.PENDING), any()))
+                .thenReturn(List.of(old));
+        when(repo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        svc.expireStale();
+
+        assertEquals(ToolApproval.EXPIRED, old.getStatus());
+        assertTrue(old.getResult().contains("自动作废"), old.getResult());
+        assertEquals(ToolApproval.PENDING, fresh.getStatus(), "没到期的不能动");
+        verify(repo, times(1)).save(any());
+    }
+
+    @Test
+    @DisplayName("批量批准逐条走同一条链路,已处理过的跳过而不是整批失败")
+    void batchApproveSkipsDecided() throws Exception {
+        ToolApproval a = stub(pending(20L, "echo", "{\"n\":1}"));
+        ToolApproval already = pending(21L, "echo", "{\"n\":2}");
+        already.setStatus(ToolApproval.DONE);
+        when(repo.findById(21L)).thenReturn(Optional.of(already));
+
+        Map<String, Object> r = svc.batchApprove(List.of(20L, 21L));
+
+        assertEquals(1, r.get("approved"));
+        // 批准是异步执行的,先等状态落定再数调用次数 —— 否则数到的是"提交了没有"而不是"跑了没有"
+        awaitStatus(a, ToolApproval.DONE);
+        assertEquals(1, echo.calls, "只有真正待批的那条被执行");
+        assertEquals(ToolApproval.DONE, already.getStatus(), "已处理的不该被重复执行");
+    }
+
+    @Test
+    @DisplayName("拒绝带理由时写进公司动态,模型下一轮才知道为什么不行")
+    void rejectWithReasonIsNarrated() {
+        ToolApproval a = stub(pending(30L, "rea_reverse", "{}"));
+
+        svc.reject(30L, "这个包不该在本机打开");
+
+        assertEquals(ToolApproval.REJECTED, a.getStatus());
+        assertTrue(a.getResult().contains("不该在本机打开"), a.getResult());
+        ArgumentCaptor<Activity> cap = ArgumentCaptor.forClass(Activity.class);
+        verify(activityRepo).save(cap.capture());
+        assertTrue(cap.getValue().getContent().contains("rea_reverse"),
+                "光拒绝不说话,模型下一轮只会换个参数再申请一次");
     }
 }

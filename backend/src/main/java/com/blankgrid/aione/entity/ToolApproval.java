@@ -26,6 +26,8 @@ public class ToolApproval {
     public static final String FAILED = "FAILED";
     /** 创始人拒绝 */
     public static final String REJECTED = "REJECTED";
+    /** 超过保留期没人处理,自动作废 */
+    public static final String EXPIRED = "EXPIRED";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

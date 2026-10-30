@@ -11,6 +11,7 @@ import SettingsView from './views/SettingsView.vue'
 import CommandCenter from './views/CommandCenter.vue'
 import GoalDetail from './views/GoalDetail.vue'
 import ArtifactLibrary from './views/ArtifactLibrary.vue'
+import Approvals from './views/Approvals.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -21,6 +22,7 @@ const router = createRouter({
     { path: '/org', name: 'org', component: OrgChart },
     { path: '/board', name: 'board', component: Dashboard },
     { path: '/artifacts', name: 'artifacts', component: ArtifactLibrary },
+    { path: '/approvals', name: 'approvals', component: Approvals },
     { path: '/settings', name: 'settings', component: SettingsView },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ]

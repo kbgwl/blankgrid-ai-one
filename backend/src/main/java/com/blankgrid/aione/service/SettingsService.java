@@ -136,6 +136,13 @@ public class SettingsService {
         /** CEO 一轮巡视最多调几轮工具。轮数越多越准,也越贵 */
         public int ceoToolRounds = 2;
         /**
+         * 待批调用保留多少小时没人处理就自动作废。
+         *
+         * <p>不设这个上限,定时巡视会一直往里堆:模型每轮都看到"上次没查成",
+         * 换几个参数再申请一次,一个月后列表里全是一周前的询价单,真正要紧的那条反而被埋了。
+         */
+        public int approvalTtlHours = 24;
+        /**
          * 决策模型不受省钱护栏降级(null = 按开启处理)。
          * 拍板是公司唯一的"大脑",被降级成便宜模型后决策质量会直接塌,省下的钱不够赔。
          */
@@ -233,6 +240,7 @@ public class SettingsService {
             if (cache.ceoAutoTools == null) cache.ceoAutoTools = Boolean.TRUE;
             if (cache.decisionStrongModel == null) cache.decisionStrongModel = Boolean.TRUE;
             if (cache.ceoToolRounds <= 0) cache.ceoToolRounds = 2;
+            if (cache.approvalTtlHours <= 0) cache.approvalTtlHours = 24;
         }
         return cache;
     }
@@ -272,6 +280,7 @@ public class SettingsService {
         if (incoming.toolPolicyDefault != null) current.toolPolicyDefault = normalizePolicy(incoming.toolPolicyDefault, "");
         if (incoming.ceoAutoTools != null) current.ceoAutoTools = incoming.ceoAutoTools;
         if (incoming.ceoToolRounds > 0) current.ceoToolRounds = Math.min(6, incoming.ceoToolRounds);
+        if (incoming.approvalTtlHours > 0) current.approvalTtlHours = Math.min(720, incoming.approvalTtlHours);
         if (incoming.decisionStrongModel != null) current.decisionStrongModel = incoming.decisionStrongModel;
         if (incoming.rea != null) {
             if (current.rea == null) current.rea = new Rea();
@@ -552,6 +561,11 @@ public class SettingsService {
 
     public int ceoToolRounds() {
         return Math.max(0, Math.min(6, get().ceoToolRounds));
+    }
+
+    /** 待批调用保留时长(小时)。1 ~ 720。 */
+    public int approvalTtlHours() {
+        return Math.max(1, Math.min(720, get().approvalTtlHours));
     }
 
     /** 决策模型是否跳过省钱护栏。默认 true:拍板质量优先。 */

@@ -8,6 +8,10 @@ import java.time.Instant;
  * 公司运营动态:目标 / 纠偏 / CEO 汇报 / 上报待决
  * GOAL=公司目标(创始人)  FEEDBACK=纠偏指令(创始人)
  * REPORT=CEO 汇报        ESCALATION=CEO 上报,等创始人处理
+ *
+ * <p>注意:CEO 取证与决策原文不写这里,走 {@link DecisionTrace}。
+ * 动态是给创始人看"公司发生了什么"的叙事,一条一两百字;
+ * 证据可能几万字,混进来要么撑爆长度上限,要么被裁掉,两头都不像。
  */
 @Entity
 @Table(name = "activities")

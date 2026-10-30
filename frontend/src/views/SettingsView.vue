@@ -220,6 +220,12 @@
               <div class="lbl"><b>最多查几轮</b><span>轮数越多越准,也越贵:一轮 = 一次模型调用 + 若干次工具</span></div>
               <div class="ctl stepper-ctl"><el-input-number v-model="form.ceoToolRounds" :min="1" :max="6" size="small" /><i class="unit">轮</i></div>
             </div>
+            <div class="set-row" :class="{ dirty: dirty('approvalTtlHours') }">
+              <div class="lbl"><b>待批保留时长</b>
+                <span>超过这个时间没人处理就自动作废。只标记不删除 —— 不然"这条到底批没批过"永远说不清</span>
+              </div>
+              <div class="ctl stepper-ctl"><el-input-number v-model="form.approvalTtlHours" :min="1" :max="720" size="small" /><i class="unit">小时</i></div>
+            </div>
             <div class="set-row" :class="{ dirty: dirty('decisionStrongModel') }">
               <div class="lbl"><b>决策模型不受省钱降级</b>
                 <span>拍板与目标拆解走决策槽位的原模型;关掉后和普通调用一样会被换成省钱模型</span>
@@ -236,7 +242,7 @@
                   <div class="tr-id">
                     <b>{{ t.name }}</b>
                     <span :class="{ off: !t.available }">
-                      {{ t.category }} · {{ t.available ? (t.decisionSafe ? 'CEO 可自查' : '仅岗位可用') : t.reason }}
+                      {{ t.category }} · {{ t.available ? (t.decisionSafe ? 'CEO 可直接查' : 'CEO 只能申请') : t.reason }}
                     </span>
                   </div>
                   <el-select :model-value="policyOf(t)" size="small" style="width: 118px"
@@ -281,7 +287,8 @@
             <!-- 待批调用 -->
             <div class="set-row col">
               <div class="lbl"><b>待批调用</b>
-                <span>批准会拿原始参数立刻执行一次,结果写进公司动态 —— CEO 下一轮巡视就能读到这份证据</span>
+                <span>批准会拿原始参数立刻执行一次,结果写进公司动态 —— CEO 下一轮巡视就能读到这份证据。
+                  这里只看得到最新几条,完整列表与决策档案在<router-link to="/approvals" class="inline-go">自主调用</router-link>页</span>
               </div>
               <div class="backup-list">
                 <div v-if="!approvalInfo.items.length" class="backup-none">没有待批的调用。</div>
@@ -496,7 +503,7 @@ const defaults = {
   reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
   decisionProvider: '', decisionModel: '',
   // 自主调用:策略表 key 支持 工具名 / category:分类 / *。空对象 = 全部走工具自己的默认策略
-  decisionStrongModel: true, ceoAutoTools: true, ceoToolRounds: 2,
+  decisionStrongModel: true, ceoAutoTools: true, ceoToolRounds: 2, approvalTtlHours: 24,
   toolPolicy: {}, toolPolicyDefault: '',
   // REA 逆向分析:workdir 是安全边界,不配就不允许分析任何路径
   rea: { enabled: false, command: 'npx -y rea-agents@latest', workdir: '', timeoutSeconds: 240 },
@@ -1193,6 +1200,13 @@ onBeforeUnmount(() => observer && observer.disconnect())
 .ap-act { display: flex; gap: 8px; }
 .ap-act .fetch-btn { margin: 0; padding: 4px 12px; font-size: 11px; border-radius: 6px; }
 .ap-act .fetch-btn.danger:hover:not(:disabled) { color: var(--st-error); border-color: var(--st-error); }
+
+/* 卡片里指向自主调用页的入口:待批和档案在那边看,这里只是提示 */
+.inline-go {
+  color: var(--glow-cyan); text-decoration: none; margin: 0 2px;
+  border-bottom: 1px dotted var(--glow-cyan-dim);
+}
+.inline-go:hover { border-bottom-style: solid; }
 
 @media (max-width: 900px) {
   .set-grid { grid-template-columns: 1fr; gap: 12px; }
