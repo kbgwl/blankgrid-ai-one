@@ -72,6 +72,23 @@ public class Deliverable {
     private int reviewAttempts = 0;
     private int reviewScore = 0;
 
+    /**
+     * 额外获批的返工轮次。
+     *
+     * <p>返工到顶直接 BLOCKED 是原来的唯一出口,而实测里绝大多数"用尽"的成果
+     * 只差一两处机械修复(占位符、断句、少一个章节)。让创始人每条都手工点重试,
+     * 或者让 CEO 每次都上报告"请授权",都不是办法。
+     *
+     * <p>所以单列一个计数:上限 = 全局轮次 + 这里。追加是显式动作,会留痕,
+     * 也不会把 attempts 归零 —— 归零等于白送满额轮次,那不是"再给一次机会"。
+     *
+     * <p>类型是 Integer 而不是 int:ddl-auto=update 给已有表加 int 列会生成
+     * "add column bonus_rounds integer not null",而表里已经有行 —— H2 直接拒绝
+     * (NULL not allowed for column),整个加列静默失败,直到第一次查询才炸
+     * "Column not found"。可空列才能顺利加上,旧行由 getter 兜成 0。
+     */
+    private Integer bonusRounds = 0;
+
     @Column(length = 4000)
     private String reviewNotes = "";
 
@@ -115,6 +132,8 @@ public class Deliverable {
     public void setAttempts(int attempts) { this.attempts = attempts; }
     public int getReviewAttempts() { return reviewAttempts; }
     public void setReviewAttempts(int reviewAttempts) { this.reviewAttempts = reviewAttempts; }
+    public int getBonusRounds() { return bonusRounds == null ? 0 : bonusRounds; }
+    public void setBonusRounds(Integer bonusRounds) { this.bonusRounds = bonusRounds == null ? 0 : bonusRounds; }
     public int getReviewScore() { return reviewScore; }
     public void setReviewScore(int reviewScore) { this.reviewScore = reviewScore; }
     public String getReviewNotes() { return reviewNotes; }

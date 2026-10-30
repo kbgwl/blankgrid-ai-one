@@ -146,6 +146,26 @@ public class GoalController {
     }
 
     /**
+     * 追加返工轮次:返工用尽之后的第三条路。
+     *
+     * <p>重试会把 attempts 归零(白送满额轮次),这里是"再给一轮" ——
+     * 上限从全局轮次往上抬,历史轮次仍然算数。
+     */
+    @PostMapping("/{id}/deliverables/{deliverableId}/grant-rounds")
+    public Map<String, Object> grantRounds(@PathVariable Long id, @PathVariable Long deliverableId,
+                                           @RequestBody(required = false) GrantBody body) {
+        int cap = engine.grantRounds(id, deliverableId,
+                body == null || body.rounds <= 0 ? 1 : body.rounds,
+                body == null ? "" : body.reason);
+        return Map.of("ok", true, "cap", cap);
+    }
+
+    public static class GrantBody {
+        public int rounds = 1;
+        public String reason = "";
+    }
+
+    /**
      * 打包下载:默认 zip(原样的 Markdown 工程包);
      * ?format=docx|pdf|pptx 则整本项目合成一个文件直接下载。
      */

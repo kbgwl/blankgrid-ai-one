@@ -59,6 +59,7 @@ public class CeoLoopService {
     private final SettingsService settings;
     private final com.blankgrid.aione.tool.ToolRegistry toolRegistry;
     private final com.blankgrid.aione.repo.DecisionTraceRepository traceRepo;
+    private final CompanyEngineService engine;
     private final EventPusher pusher;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -76,7 +77,8 @@ public class CeoLoopService {
                           TaskService taskService, LlmService llm,
                           SettingsService settings, EventPusher pusher,
                           com.blankgrid.aione.tool.ToolRegistry toolRegistry,
-                          com.blankgrid.aione.repo.DecisionTraceRepository traceRepo) {
+                          com.blankgrid.aione.repo.DecisionTraceRepository traceRepo,
+                          CompanyEngineService engine) {
         this.empRepo = empRepo;
         this.taskRepo = taskRepo;
         this.activityRepo = activityRepo;
@@ -91,6 +93,7 @@ public class CeoLoopService {
         this.pusher = pusher;
         this.toolRegistry = toolRegistry;
         this.traceRepo = traceRepo;
+        this.engine = engine;
     }
 
     /** 心跳:按设置里的频率触发自动巡视(间隔可随时在设置页调整) */
@@ -232,6 +235,26 @@ public class CeoLoopService {
             }
         }
 
+        // 受阻交付物要给 id,CEO 才能用 grant_rounds 决定"这条值不值得再给一轮"。
+        // 只列 id 和分数不够 —— 它得看见"差在哪",否则只能凭分数猜。
+        sb.append("\n【返工用尽、已停摆的交付物(可用 grant_rounds 追加轮次,每轮最多 3 条)】\n");
+        int blockedShown = 0;
+        for (Goal g : goals) {
+            if (blockedShown >= 12) break;
+            for (Deliverable d : delRepo.findByGoalIdOrderBySortOrderAscIdAsc(g.getId())) {
+                if (!Deliverable.BLOCKED.equals(d.getStatus())) continue;
+                if (blockedShown++ >= 12) break;
+                int cap = CompanyEngineService.attemptCap(settings.get().maxReviewRounds, d.getBonusRounds());
+                sb.append("- deliverableId=").append(d.getId())
+                  .append(" 「").append(clip(d.getTitle(), 36)).append("」")
+                  .append(" 已用 ").append(d.getAttempts()).append("/").append(cap).append(" 轮")
+                  .append(" · 上次 ").append(d.getReviewScore()).append(" 分")
+                  .append(" · ").append(clip(d.getReviewNotes() == null ? "" : d.getReviewNotes(), 150))
+                  .append("\n");
+            }
+        }
+        if (blockedShown == 0) sb.append("(没有停摆的交付物)\n");
+
         // 岗位花名册 + 队列深度(队列满勿派活)
         sb.append("\n【在编岗位(employeeId 用于派活;队列=该岗位待处理+执行中,≥2 勿再派)】\n");
         for (Employee e : empRepo.findAll()) {
@@ -294,9 +317,12 @@ public class CeoLoopService {
         sb.append("{\"type\":\"escalate\",\"message\":\"必须由创始人拍板的事项\"},");
         sb.append("{\"type\":\"goal_start\",\"goalId\":目标id},");
         sb.append("{\"type\":\"retry_workstream\",\"workstreamId\":工作流id},");
+        sb.append("{\"type\":\"grant_rounds\",\"deliverableId\":交付物id,\"reason\":\"为什么值得再给一轮\"},");
         sb.append("{\"type\":\"goal_accept\",\"goalId\":目标id,\"message\":\"复核结论\"}");
         sb.append("]}");
         sb.append(" 派活要有节制:队列满勿派;无必要不派;评估优先。dispatch 可带 contextTaskIds 引用上游任务产出,让岗位基于已有成果工作。");
+        sb.append(" grant_rounds 是「返工用尽」之后的唯一自主手段:只在「问题机械可修、且这份成果缺了它整条线就断」时用,一轮最多 3 条。"
+                + " 反复追加同一份没有意义 —— 三轮之后还不过,就该 escalate 让创始人决定收还是弃。");
 
         if (weekly) {
             // 周报:过去 7 天的汇报摘要
@@ -455,6 +481,8 @@ public class CeoLoopService {
         String json = extractJson(reply);
         String summary = "";
         int dispatched = 0, reported = 0, escalated = 0, reworked = 0, archived = 0, goalOps = 0;
+        // 追加返工是花钱的动作:一轮巡视只放 3 条,否则等于把轮次上限取消了
+        int roundsGranted = 0;
         try {
             JsonNode root = mapper.readTree(json);
             summary = root.path("summary").asText("");
@@ -544,6 +572,22 @@ public class CeoLoopService {
                                     goalOps++;
                                 } catch (Exception e) {
                                     saveReportAggregated("推进目标失败:" + e.getMessage(), cycleNo, Duration.ofHours(1));
+                                }
+                            }
+                        }
+                        case "grant_rounds" -> {
+                            long delId = d.path("deliverableId").asLong(0);
+                            String why = d.path("reason").asText("");
+                            if (delId > 0 && roundsGranted < 3) {
+                                try {
+                                    int cap = engine.grantRounds(null, delId, 1, why);
+                                    activityRepo.save(new Activity(Activity.REPORT,
+                                            "CEO 为交付物 #" + delId + " 追加 1 轮返工(上限 " + cap + " 轮)。"
+                                                    + (why.isBlank() ? "" : clip(why, 200)), cycleNo));
+                                    roundsGranted++;
+                                    goalOps++;
+                                } catch (Exception e) {
+                                    saveReportAggregated("追加返工轮次失败:" + e.getMessage(), cycleNo, Duration.ofHours(1));
                                 }
                             }
                         }

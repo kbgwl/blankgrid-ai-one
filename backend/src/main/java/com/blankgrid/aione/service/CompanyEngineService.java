@@ -1038,7 +1038,7 @@ public class CompanyEngineService {
                 pushGoal(g.getId());
                 return;
             }
-            int maxAttempts = Math.max(1, settings.get().maxReviewRounds) + 1;
+            int maxAttempts = attemptCap(settings.get().maxReviewRounds, d.getBonusRounds());
             if (d.getAttempts() < maxAttempts) {
                 d.setStatus(Deliverable.READY);
                 delRepo.save(d);
@@ -1065,7 +1065,7 @@ public class CompanyEngineService {
             pushGoal(d.getGoalId());
             return;
         }
-        int maxAttempts = Math.max(1, settings.get().maxReviewRounds) + 1;
+        int maxAttempts = attemptCap(settings.get().maxReviewRounds, d.getBonusRounds());
         if (d.getAttempts() < maxAttempts) {
             d.setStatus(Deliverable.READY);
             delRepo.save(d);
@@ -1172,6 +1172,56 @@ public class CompanyEngineService {
         activity(Activity.ESCALATION, "工作流「" + ws.getTitle() + "」受阻:" + clip(reason, 800), goalId);
         pushEscalation();
         if (goalId != null) pushGoal(goalId);
+    }
+
+    /**
+     * 返工上限 = 全局轮次 + 首轮 + 追加轮次。
+     *
+     * <p>抽成静态方法是因为它决定"这份成果还能不能返工":算错一次就是要么白烧钱,
+     * 要么明明还有机会却被打成 BLOCKED 再也推不动。而且 CEO 上下文里展示的
+     * "已用 x/y 轮"必须和判定用的是同一个公式 —— 两处各算一遍,迟早对不上。
+     */
+    static int attemptCap(int maxReviewRounds, int bonusRounds) {
+        return Math.max(1, maxReviewRounds) + 1 + Math.max(0, bonusRounds);
+    }
+
+    /**
+     * 追加返工轮次 —— 受阻之后的第三条路。
+     *
+     * <p>原来返工到顶只有 BLOCKED 一个出口:成果停在半成品、下游全堵死、目标再也推不动。
+     * 实测里"轮次用尽"的成果绝大多数只差机械修复(占位符、断句、少一节),
+     * 而人要么逐条点重试、要么只能接受一个半成品。
+     *
+     * <p>这里加的是 {@code bonusRounds} 而不是把 attempts 归零:
+     * 归零等于白送满额轮次(全局轮次+1),那是"重新来过",不是"再给一次机会"。
+     *
+     * @param rounds 追加几轮,夹在 1~3
+     * @return 追加后这个交付物的总上限
+     */
+    @Transactional
+    public int grantRounds(Long goalId, Long deliverableId, int rounds, String reason) {
+        Deliverable d = delRepo.findById(deliverableId)
+                .orElseThrow(() -> new IllegalArgumentException("交付物不存在"));
+        // 前端是按"某个目标下的某个交付物"发起的,不校验的话可以拿别的目标的 id 来抬轮次
+        if (goalId != null && (d.getGoal() == null || !goalId.equals(d.getGoal().getId()))) {
+            throw new IllegalArgumentException("交付物不属于该目标");
+        }
+        int add = Math.max(1, Math.min(3, rounds));
+        d.setBonusRounds(Math.max(0, d.getBonusRounds()) + add);
+        if (Deliverable.BLOCKED.equals(d.getStatus()) || Deliverable.WAITING.equals(d.getStatus())) {
+            d.setStatus(Deliverable.READY);
+            d.setCurrentTaskId(null);
+        }
+        d.setUpdatedAt(Instant.now());
+        delRepo.save(d);
+
+        Goal g = d.getGoal();
+        int cap = attemptCap(settings.get().maxReviewRounds, d.getBonusRounds());
+        activity(Activity.REPORT, "「" + d.getTitle() + "」追加 " + add + " 轮返工,上限提到 " + cap + " 轮。"
+                        + (reason == null || reason.isBlank() ? "" : "理由:" + clip(reason, 300)),
+                g == null ? null : g.getId());
+        if (g != null) pushGoal(g.getId());
+        return cap;
     }
 
     private void blockDeliverable(Deliverable d, String reason) {

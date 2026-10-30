@@ -209,8 +209,13 @@
                     <el-button v-if="artifactOf(d)" text size="small" class="d-art" @click="openArtifact(artifactOf(d))">
                       查看成果
                     </el-button>
-                    <el-button v-if="d.status === 'BLOCKED'" text size="small" class="d-retry" @click="retryDeliverable(d)">
+                    <el-button v-if="d.status === 'BLOCKED'" text size="small" class="d-retry"
+                               title="把已用轮次清零,等于重新来过" @click="retryDeliverable(d)">
                       重试
+                    </el-button>
+                    <el-button v-if="d.status === 'BLOCKED'" text size="small" class="d-retry"
+                               title="上限 +1 轮,历史轮次仍算数 —— 差一口气的成果用这个,不要用重试" @click="grantRound(d)">
+                      再给一轮
                     </el-button>
                   </div>
                 </div>
@@ -616,6 +621,17 @@ async function retryDeliverable(d) {
     ElMessage({ message: '已重置,等待重新执行', type: 'success', plain: true })
     await load()
   } catch (e) { ElMessage.error(e.response?.data?.error || '重试失败') } finally { acting.value = false }
+}
+
+// 和「重试」的区别:重试把 attempts 清零(白送满额轮次),这里是上限 +1。
+// 差一口气的成果该用这个 —— 否则前几轮指出的问题会从零开始被重新犯一遍。
+async function grantRound(d) {
+  acting.value = true
+  try {
+    const r = await api.grantRound(goal.value.id, d.id, 1, '')
+    ElMessage({ message: `已追加 1 轮,上限提到 ${r.cap} 轮`, type: 'success', plain: true })
+    await load()
+  } catch (e) { ElMessage.error(e.response?.data?.error || '追加失败') } finally { acting.value = false }
 }
 
 async function retryAllBlocked() {
