@@ -238,6 +238,68 @@ class ToolRegistryTest {
     }
 
     @Test
+    @DisplayName("同一轮里同样的只读请求只真跑一次,参数不同不命中")
+    void roundCacheReusesReadOnly() {
+        CountingTool t = new CountingTool("c_read", true, true, "auto");
+        ToolRegistry r = registry(t);
+
+        r.invoke("c_read", "{\"q\":1}", ToolContext.empty());
+        String second = r.invoke("c_read", "{\"q\":1}", ToolContext.empty());
+        assertEquals(1, t.calls.get(), "同样的请求不该跑第二遍");
+        assertTrue(second.contains("复用上次结果"), second);
+
+        r.invoke("c_read", "{\"q\":2}", ToolContext.empty());
+        assertEquals(2, t.calls.get(), "参数不同是另一件事,不能拿旧结果糊弄");
+    }
+
+    @Test
+    @DisplayName("有副作用的工具不缓存:写两次就是写两次")
+    void noCacheForWriteTools() {
+        CountingTool w = new CountingTool("c_write", true, false, "auto");
+        ToolRegistry r = registry(w);
+
+        r.invoke("c_write", "{}", ToolContext.empty());
+        r.invoke("c_write", "{}", ToolContext.empty());
+
+        assertEquals(2, w.calls.get(), "把写操作缓存起来,等于悄悄吞掉一次执行");
+    }
+
+    @Test
+    @DisplayName("失败不缓存:下次同样的调用也许就成功了")
+    void failureIsNotCached() {
+        AtomicInteger n = new AtomicInteger();
+        AiTool flaky = new AiTool() {
+            @Override public String name() { return "c_flaky"; }
+            @Override public String description() { return "时好时坏"; }
+            @Override public String paramsSchema() { return "{}"; }
+            @Override public String execute(String argsJson, ToolContext ctx) {
+                if (n.incrementAndGet() == 1) throw new IllegalStateException("外部接口 502");
+                return "成功了";
+            }
+        };
+        ToolRegistry r = registry(flaky);
+
+        String first = r.invoke("c_flaky", "{}", ToolContext.empty());
+        assertTrue(first.contains("失败"), first);
+        assertEquals("成功了", r.invoke("c_flaky", "{}", ToolContext.empty()),
+                "把失败缓存住,模型就再也没机会重试");
+        assertEquals(2, n.get());
+    }
+
+    @Test
+    @DisplayName("新一轮开始清空缓存,上一单的查证结果不会当这一单的现状")
+    void resetClearsCache() {
+        CountingTool t = new CountingTool("c_reset", true, true, "auto");
+        ToolRegistry r = registry(t);
+
+        r.invoke("c_reset", "{}", ToolContext.empty());
+        r.resetStats();
+        r.invoke("c_reset", "{}", ToolContext.empty());
+
+        assertEquals(2, t.calls.get(), "跨任务复用就是拿过期数据当现状");
+    }
+
+    @Test
     @DisplayName("未知工具名不炸,回一句可用的清单")
     void unknownTool() {
         ToolRegistry r = registry(new CountingTool("known", true, true, "auto"));

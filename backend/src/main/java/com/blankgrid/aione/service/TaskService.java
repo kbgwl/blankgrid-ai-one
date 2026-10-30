@@ -441,6 +441,9 @@ public class TaskService {
      */
     private String converse(List<ChatMessage> messages, Task task, Employee emp,
                             java.util.function.Consumer<String> onDelta, Long taskId) {
+        // 一次任务 = 一个新的取证窗口:上一单查到的价格/库存不能当这一单的现状。
+        // (这个方法过去从没被调用过,所以"本轮工具统计"其实一直在累积 —— 顺手修掉)
+        tools.resetStats();
         List<ToolSpec> specs = new ArrayList<>();
         for (com.blankgrid.aione.tool.AiTool t : tools.usable()) {
             // 被创始人关掉的工具不要出现在声明里:留着它只会让模型白调一次、

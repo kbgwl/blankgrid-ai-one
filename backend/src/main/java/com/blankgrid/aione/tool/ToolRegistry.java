@@ -49,6 +49,29 @@ public class ToolRegistry {
     /** 最近一轮任务里各工具被调用的次数与耗时,给界面显示"它到底干了什么" */
     private final Map<String, Map<String, Object>> lastRoundStats = new ConcurrentHashMap<>();
 
+    /**
+     * 同一轮任务内的结果缓存,key = 工具名 + 参数原文。
+     *
+     * <p>模型有个很常见的毛病:相邻两轮里问一模一样的话(尤其是算同一个数、
+     * 查同一个包的情况),每次都真跑一遍。REA 一次几分钟,重复跑纯属白等。
+     *
+     * <p>只缓存<b>只读</b>工具,而且只在一轮任务内有效(每轮开始清空):
+     * 跨任务复用就是拿过期数据当现状 —— 价格、库存这类东西尤其不能这么干。
+     */
+    private final Map<String, Cached> roundCache = new ConcurrentHashMap<>();
+
+    /**
+     * 缓存保留时长。为什么不只靠"每轮清空":resetStats 过去根本没人调用过
+     * (它同时承担着"本轮工具统计"的职责,而那个列表也只是没人看而已)。
+     * 只靠生命周期清空,一旦漏调就是永久缓存 —— 拿三天前的价格当现价。
+     * 所以再加一道时间兜底。
+     */
+    static final long CACHE_TTL_MS = 180_000;
+
+    private record Cached(String text, long at) {
+        boolean fresh() { return System.currentTimeMillis() - at < CACHE_TTL_MS; }
+    }
+
     public ToolRegistry(List<AiTool> discovered, SettingsService settings,
                         ToolApprovalRepository approvals, ToolCallLogRepository callLogs) {
         this.settings = settings;
@@ -193,6 +216,17 @@ public class ToolRegistry {
 
     private String executeRaw(AiTool tool, String argsJson, ToolContext ctx, String source) {
         String name = tool.name();
+        // 只读工具才缓存:有副作用的重复执行两次就是执行两次,不是"省一次"
+        boolean cacheable = tool.decisionSafe();
+        String cacheKey = name + "|" + (argsJson == null ? "" : argsJson.trim());
+        if (cacheable) {
+            Cached hit = roundCache.get(cacheKey);
+            if (hit != null && hit.fresh()) {
+                log.debug("工具结果命中本轮缓存:{}", name);
+                return "（刚刚执行过同样的请求,直接复用上次结果)\n" + hit.text();
+            }
+            if (hit != null) roundCache.remove(cacheKey);
+        }
         long t0 = System.currentTimeMillis();
         int timeout = Math.max(5, tool.timeoutSeconds());
         Future<String> f = pool.submit(() -> tool.execute(argsJson, ctx));
@@ -233,6 +267,8 @@ public class ToolRegistry {
         stat.put("chars", result.length());
         lastRoundStats.put(name + "-" + cost, stat);
         audit(tool, argsJson, ctx, source, ok, cost, result);
+        // 失败不缓存:下一次同样的调用也许就成功了(网络抖动、外部进程没起来)
+        if (cacheable && ok) roundCache.put(cacheKey, new Cached(result, System.currentTimeMillis()));
 
         if (result.isBlank()) return "工具没有返回任何内容。";
         return result.length() <= MAX_RESULT_CHARS
@@ -292,9 +328,10 @@ public class ToolRegistry {
         return new ArrayList<>(tools.keySet());
     }
 
-    /** 清空本轮的调用统计,每轮任务开始前调一次。 */
+    /** 清空本轮的调用统计与结果缓存,每轮任务开始前调一次。 */
     public void resetStats() {
         lastRoundStats.clear();
+        roundCache.clear();
     }
 
     /** 本轮工具调用记录,给界面展示。 */
