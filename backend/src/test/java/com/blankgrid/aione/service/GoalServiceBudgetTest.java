@@ -39,7 +39,7 @@ class GoalServiceBudgetTest {
                 mock(DeliverableRepository.class), mock(ArtifactRepository.class),
                 activityRepo, mock(TokenLogRepository.class),
                 mock(EventPusher.class), mock(ApplicationEventPublisher.class), new ObjectMapper(),
-                costMock());
+                costMock(), mock(EscalationService.class));
         when(goalRepo.save(any(Goal.class))).thenAnswer(i -> i.getArgument(0));
         when(wsRepo.countByGoalId(anyLong())).thenReturn(1L);
     }

@@ -78,12 +78,15 @@
           <span class="decide-tag">等你拍板</span>
           <b>{{ openItems.length }} 件</b>
           <span class="decide-sub">需要你点头或补料的事,不处理会一直挡在路上</span>
+          <button class="decide-all" :disabled="acking" @click="ackAll">{{ acking ? '处理中…' : '全部已阅' }}</button>
         </div>
         <div class="decide-list">
           <article v-for="a in openItems.slice(0, 6)" :key="a.id" class="decide-item" :class="'t-' + a.type.toLowerCase()">
             <div class="di-top">
               <span class="di-type">{{ typeMap[a.type] || a.type }}</span>
-              <span class="di-time">{{ fmt(a.createdAt) }}</span>
+              <!-- 同一件事反复了几次。老板判断「值不值得管」靠的是这个,不是「有条上报」 -->
+              <span v-if="(a.occurrences || 1) > 1" class="di-times">×{{ a.occurrences }}</span>
+              <span class="di-time">{{ fmt(a.lastSeenAt || a.createdAt) }}</span>
             </div>
             <p class="di-text">{{ a.content }}</p>
             <div class="di-foot">
@@ -175,6 +178,7 @@ const taskOpen = ref(false)
 const openedTaskId = ref(null)
 const loadError = ref('')
 const loading = ref(false)
+const acking = ref(false)
 const newActs = ref(new Set())
 
 const typeMap = { GOAL: '目标', FEEDBACK: '纠偏', REPORT: '进展', ESCALATION: '上报' }
@@ -371,6 +375,20 @@ async function ack(a) {
     ElMessage.error(e.response?.data?.message || '这条动态没能关闭')
   }
 }
+/* 一次清掉所有待办:这些事里有相当一部分是「知道了,现在没法动」,
+   逼着逐条点等于逼着放弃看完 */
+async function ackAll() {
+  acking.value = true
+  try {
+    const r = await api.ackAllEscalations()
+    ElMessage.success(`已关闭 ${r.acked || 0} 条`)
+    load()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '批量关闭失败')
+  } finally {
+    acking.value = false
+  }
+}
 async function runCycle() {
   cycling.value = true
   try {
@@ -507,6 +525,19 @@ onBeforeUnmount(() => {
   font-size: 10.5px; color: var(--text-faint); letter-spacing: .08em;
 }
 .di-ack:hover { color: var(--text-moon); }
+.di-times {
+  font-size: 10px; padding: 0 5px; border-radius: 999px;
+  color: var(--st-warn); background: rgba(var(--rgb-warn), .1);
+  border: 1px solid rgba(var(--rgb-warn), .22);
+}
+.decide-all {
+  margin-left: auto; background: none; cursor: pointer;
+  border: 1px solid var(--border-hair); border-radius: 999px;
+  padding: 2px 10px; font-size: 10.5px; letter-spacing: .08em;
+  color: var(--text-faint); transition: color .3s var(--ease-quiet), border-color .3s var(--ease-quiet);
+}
+.decide-all:hover { color: var(--text-moon); border-color: var(--border-hair-strong); }
+.decide-all:disabled { opacity: .5; cursor: default; }
 
 /* ===== 泳道 ===== */
 .lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }

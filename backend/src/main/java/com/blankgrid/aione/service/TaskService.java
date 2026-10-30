@@ -741,11 +741,14 @@ public class TaskService {
             if (consecutive >= 3 && !Employee.STATUS_DISABLED.equals(emp.getStatus())) {
                 emp.setStatus(Employee.STATUS_DISABLED);
                 empRepo.save(emp);
-                activityRepo.save(new com.blankgrid.aione.entity.Activity(
+                com.blankgrid.aione.entity.Activity escalation = new com.blankgrid.aione.entity.Activity(
                         com.blankgrid.aione.entity.Activity.ESCALATION,
                         "岗位「" + emp.getName() + "」连续 " + consecutive + " 次任务失败,已自动叫停。最近失败原因:" + clip(failedTask.getError(), 150) +
                                 "。复盘完成后请创始人复核复岗。",
-                        null));
+                        null);
+                // 挂上主体键:复岗之后这条该自己消失,不用创始人回来手动点已阅
+                escalation.setDedupeKey(EscalationService.ofEmployee(emp.getId()));
+                activityRepo.save(escalation);
                 Map<String, Object> p = new HashMap<>();
                 p.put("count", activityRepo.countByTypeAndStatus(com.blankgrid.aione.entity.Activity.ESCALATION,
                         com.blankgrid.aione.entity.Activity.OPEN));

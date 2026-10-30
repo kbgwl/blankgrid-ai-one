@@ -15,6 +15,9 @@ public interface WorkstreamRepository extends JpaRepository<Workstream, Long> {
 
     List<Workstream> findByStatusIn(Collection<String> statuses);
 
+    /** 补历史上报的主体键要用 */
+    List<Workstream> findByTitleOrderByIdDesc(String title);
+
     @Query("select count(w) from Workstream w where w.goal.id = :goalId")
     long countByGoalId(@Param("goalId") Long goalId);
 

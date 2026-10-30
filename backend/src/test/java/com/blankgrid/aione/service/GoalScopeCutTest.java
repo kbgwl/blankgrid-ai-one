@@ -54,7 +54,7 @@ class GoalScopeCutTest {
         when(costs.ofGoal(any())).thenReturn(0.0);
         svc = new GoalService(goalRepo, wsRepo, delRepo, mock(ArtifactRepository.class),
                 activityRepo, mock(TokenLogRepository.class), mock(EventPusher.class),
-                publisher, new ObjectMapper(), costs);
+                publisher, new ObjectMapper(), costs, mock(EscalationService.class));
         when(goalRepo.save(any(Goal.class))).thenAnswer(i -> i.getArgument(0));
         when(delRepo.save(any(Deliverable.class))).thenAnswer(i -> i.getArgument(0));
         when(wsRepo.countByGoalId(anyLong())).thenReturn(1L);

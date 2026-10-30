@@ -18,6 +18,9 @@ public interface DeliverableRepository extends JpaRepository<Deliverable, Long> 
 
     List<Deliverable> findByStatusIn(Collection<String> statuses);
 
+    /** 补历史上报的主体键要用:老上报只留了标题,没有 id */
+    List<Deliverable> findByTitleOrderByIdDesc(String title);
+
     @Query("select count(d) from Deliverable d where d.goal.id = :goalId")
     long countByGoalId(@Param("goalId") Long goalId);
 

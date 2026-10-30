@@ -61,6 +61,8 @@ public class CompanyEngineService {
     private final EventPusher pusher;
     private final ObjectMapper mapper;
     private final LearningService learning;
+    /** 上报的收敛:一件事一条,问题没了自动关 */
+    private final EscalationService escalations;
 
     private final Set<Long> planningGoals = ConcurrentHashMap.newKeySet();
     private final Set<Long> planningWorkstreams = ConcurrentHashMap.newKeySet();
@@ -86,6 +88,8 @@ public class CompanyEngineService {
     public void clearLlmBlock() {
         llmBlockedUntil = 0;
         llmBlockedReason = "";
+        // 充值/换 key 之后那条「余额不足」就不再成立了,不能挂着等创始人手动已阅
+        escalations.resolve(EscalationService.LLM);
     }
 
     /** 从错误信息里认出"不是活干错了,是账户里没钱了",并据此拉起闸门。 */
@@ -100,8 +104,8 @@ public class CompanyEngineService {
         llmBlockedUntil = System.currentTimeMillis() + LLM_BLOCK_COOLDOWN_MS;
         if (first) {
             log.warn("大模型账户不可用,暂停调度:{}", llmBlockedReason);
-            activity(Activity.ESCALATION, "大模型账户余额不足,生产线已暂停调度 —— 重试不会成功,也没必要把每个"
-                    + "交付物都刷成失败。充值后在「设置 → 模型服务」点一次测试连通,10 分钟内自动恢复。", null);
+            escalations.raise(EscalationService.LLM, null, "大模型账户余额不足,生产线已暂停调度 —— 重试不会成功,"
+                    + "也没必要把每个交付物都刷成失败。充值后在「设置 → 模型服务」点一次测试连通,10 分钟内自动恢复。");
             pusher.push("llm-blocked", Map.of("reason", llmBlockedReason));
         }
     }
@@ -137,7 +141,7 @@ public class CompanyEngineService {
                                 LlmService llm, SettingsService settings,
                                 ExportService exportService,
                                 EventPusher pusher, ObjectMapper mapper,
-                                LearningService learning) {
+                                LearningService learning, EscalationService escalations) {
         this.goalRepo = goalRepo;
         this.wsRepo = wsRepo;
         this.delRepo = delRepo;
@@ -156,6 +160,7 @@ public class CompanyEngineService {
         this.pusher = pusher;
         this.mapper = mapper;
         this.learning = learning;
+        this.escalations = escalations;
     }
 
     // ==================== 事件入口 ====================
@@ -227,6 +232,10 @@ public class CompanyEngineService {
             if (!orphans.isEmpty() || idle > 0) {
                 log.warn("启动清理:{} 个中断任务重新排队,{} 个岗位恢复在岗", orphans.size(), idle);
             }
+            // 老上报没存主体键:补一遍再对账。幂等 —— 有键的不会被再碰。
+            // 不做这一步,历史上攒下的几百条假待办会一直挂在界面上,新数据再干净也没用。
+            escalations.backfill();
+            escalations.sweep();
         } catch (Exception e) {
             log.warn("启动清理失败: {}", e.getMessage());
         }
@@ -1025,6 +1034,9 @@ public class CompanyEngineService {
             d.setStatus(Deliverable.DONE);
             d.setArtifactId(art.getId());
             delRepo.save(d);
+            // 通过了:它挂过的「受阻」「缺料」都不再成立。不关就是永久假待办
+            escalations.resolve(EscalationService.ofDeliverable(d.getId()));
+            escalations.resolve(EscalationService.ofDeliverableFacts(d.getId()));
             activity(Activity.REPORT, "「" + d.getTitle() + "」通过评审,评分 " + r.score + "。"
                     + (r.summary.isBlank() ? "" : " " + clip(r.summary, 300)), g == null ? null : g.getId());
             if (g != null) {
@@ -1050,8 +1062,9 @@ public class CompanyEngineService {
                         + r.summary + (r.notes.isBlank() ? "" : "\n" + r.notes), 4000));
                 d.setUpdatedAt(Instant.now());
                 delRepo.save(d);
-                activity(Activity.ESCALATION, "「" + d.getTitle() + "」(" + r.score + " 分)缺事实,"
-                        + "继续返工只能靠编,已停止返工并挂起。补料后自动重新排队。", g.getId());
+                escalations.raise(EscalationService.ofDeliverableFacts(d.getId()), g.getId(),
+                        "「" + d.getTitle() + "」(" + r.score + " 分)缺事实,"
+                        + "继续返工只能靠编,已停止返工并挂起。补料后自动重新排队。");
                 pushEscalation();
                 pushGoal(g.getId());
                 return;
@@ -1154,8 +1167,9 @@ public class CompanyEngineService {
             fresh.setCeoSummary("全部交付完成,但均分 " + avg + " 低于质量线 " + threshold + ",需要创始人复核。");
             fresh.setUpdatedAt(Instant.now());
             goalRepo.save(fresh);
-            activity(Activity.ESCALATION, "目标「" + fresh.getTitle() + "」全部交付完成,但评审均分 "
-                    + avg + " 低于质量线 " + threshold + "。请创始人复核是否接受或要求返工。", fresh.getId());
+            escalations.raise(EscalationService.ofGoal(fresh.getId(), "score"), fresh.getId(),
+                    "目标「" + fresh.getTitle() + "」全部交付完成,但评审均分 "
+                    + avg + " 低于质量线 " + threshold + "。请创始人复核是否接受或要求返工。");
             pushEscalation();
         }
         pushGoal(fresh.getId());
@@ -1191,7 +1205,8 @@ public class CompanyEngineService {
             g.setCeoSummary("工作流受阻:" + clip(reason, 180));
             goalRepo.save(g);
         }
-        activity(Activity.ESCALATION, "工作流「" + ws.getTitle() + "」受阻:" + clip(reason, 800), goalId);
+        escalations.raise(EscalationService.ofWorkstream(ws.getId()), goalId,
+                "工作流「" + ws.getTitle() + "」受阻:" + clip(reason, 800));
         pushEscalation();
         if (goalId != null) pushGoal(goalId);
     }
@@ -1260,7 +1275,8 @@ public class CompanyEngineService {
             g.setUpdatedAt(Instant.now());
             goalRepo.save(g);
         }
-        activity(Activity.ESCALATION, "交付物「" + d.getTitle() + "」受阻:" + clip(reason, 1200), goalId);
+        escalations.raise(EscalationService.ofDeliverable(d.getId()), goalId,
+                "交付物「" + d.getTitle() + "」受阻:" + clip(reason, 1200));
         pushEscalation();
         if (goalId != null) pushGoal(goalId);
     }
@@ -1440,7 +1456,8 @@ public class CompanyEngineService {
             g.setStatus(Goal.PAUSED);
             g.setCeoSummary("目标 token 预算已用尽,已自动暂停。");
             goalRepo.save(g);
-            activity(Activity.ESCALATION, "目标「" + g.getTitle() + "」token 预算用尽,已自动暂停。", g.getId());
+            escalations.raise(EscalationService.ofGoal(g.getId(), "budget"), g.getId(),
+                    "目标「" + g.getTitle() + "」token 预算用尽,已自动暂停。");
             pushEscalation();
             pushGoal(g.getId());
         }
@@ -1517,8 +1534,9 @@ public class CompanyEngineService {
         fresh.setUpdatedAt(Instant.now());
         goalRepo.save(fresh);
         if (added.isEmpty()) return;   // 只是把重复项收敛了,不用再喊一遍
-        activity(Activity.ESCALATION, from + "需要你先确认 " + added.size() + " 件事,"
-                + "否则这部分成果只能靠编:" + clip(String.join(";", added), 700), fresh.getId());
+        escalations.raise(EscalationService.ofGoal(fresh.getId(), "facts"), fresh.getId(),
+                from + "需要你先确认 " + added.size() + " 件事,"
+                + "否则这部分成果只能靠编:" + clip(String.join(";", added), 700));
         pushEscalation();
         pushGoal(fresh.getId());
     }

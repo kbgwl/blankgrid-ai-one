@@ -29,12 +29,13 @@ public class GoalService {
     private final ApplicationEventPublisher publisher;
     private final ObjectMapper mapper;
     private final CostService costs;
+    private final EscalationService escalations;
 
     public GoalService(GoalRepository goalRepo, WorkstreamRepository wsRepo,
                        DeliverableRepository delRepo, ArtifactRepository artRepo,
                        ActivityRepository activityRepo, TokenLogRepository tokenRepo,
                        EventPusher pusher, ApplicationEventPublisher publisher,
-                       ObjectMapper mapper, CostService costs) {
+                       ObjectMapper mapper, CostService costs, EscalationService escalations) {
         this.goalRepo = goalRepo;
         this.wsRepo = wsRepo;
         this.delRepo = delRepo;
@@ -45,6 +46,7 @@ public class GoalService {
         this.publisher = publisher;
         this.mapper = mapper;
         this.costs = costs;
+        this.escalations = escalations;
     }
 
     /** 创始人下达目标:公司立即开始拆解,无需再点任何按钮。 */
@@ -137,6 +139,9 @@ public class GoalService {
             d.setReviewNotes("创始人手工定稿,视为通过。");
             d.setUpdatedAt(Instant.now());
             delRepo.save(d);
+            // 人工定稿 = 这件事结了,它挂着的上报没有理由再占着待办位
+            escalations.resolve(EscalationService.ofDeliverable(d.getId()));
+            escalations.resolve(EscalationService.ofDeliverableFacts(d.getId()));
         }
         if (a.getGoalId() != null) {
             refreshProgress(a.getGoalId());
@@ -363,6 +368,9 @@ public class GoalService {
         d.setReviewNotes(note.length() > 2000 ? note.substring(0, 2000) + "…" : note);
         d.setUpdatedAt(Instant.now());
         delRepo.save(d);
+        // 砍掉了:它那些「受阻/缺料」的上报当场作废,不该继续躺在待办里
+        escalations.resolve(EscalationService.ofDeliverable(d.getId()));
+        escalations.resolve(EscalationService.ofDeliverableFacts(d.getId()));
 
         Activity a = new Activity(Activity.REPORT,
                 "砍掉「" + d.getTitle() + "」:" + why + "。这项不再计入目标完成度。", null);

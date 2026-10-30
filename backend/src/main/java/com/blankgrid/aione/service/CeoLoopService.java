@@ -61,6 +61,7 @@ public class CeoLoopService {
     private final com.blankgrid.aione.repo.DecisionTraceRepository traceRepo;
     private final CompanyEngineService engine;
     private final EventPusher pusher;
+    private final EscalationService escalations;
     private final ObjectMapper mapper = new ObjectMapper();
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -78,7 +79,7 @@ public class CeoLoopService {
                           SettingsService settings, EventPusher pusher,
                           com.blankgrid.aione.tool.ToolRegistry toolRegistry,
                           com.blankgrid.aione.repo.DecisionTraceRepository traceRepo,
-                          CompanyEngineService engine) {
+                          CompanyEngineService engine, EscalationService escalations) {
         this.empRepo = empRepo;
         this.taskRepo = taskRepo;
         this.activityRepo = activityRepo;
@@ -94,6 +95,7 @@ public class CeoLoopService {
         this.toolRegistry = toolRegistry;
         this.traceRepo = traceRepo;
         this.engine = engine;
+        this.escalations = escalations;
     }
 
     /** 心跳:按设置里的频率触发自动巡视(间隔可随时在设置页调整) */
@@ -175,6 +177,13 @@ public class CeoLoopService {
         long cycleNo = cycleCounter.incrementAndGet();
         pushCeoStatus("RUNNING");
         try {
+            // 先对账再决策:上一轮之后有些事已经自己好了,不能让它们继续占用
+            // 「有多少事等你拍板」这个数字,更不能喂进 CEO 的上下文里当现状
+            try {
+                escalations.sweep();
+            } catch (Exception e) {
+                log.debug("上报对账失败(不影响本轮决策):{}", e.getMessage());
+            }
             String reply = askCeo(weekly, cycleNo);
             String summary = executeDecisions(reply, cycleNo);
             Map<String, Object> out = new LinkedHashMap<>();
@@ -258,6 +267,21 @@ public class CeoLoopService {
         // 给它一个说出来的通道,总比它默默把同一项再推三轮、或者干脆不提这件事好。
         sb.append("其中确实不值得再投入的,可以用 escalate 提出砍掉的建议(写明 deliverableId 和理由);"
                 + "你没有权力自己砍 —— 目标被悄悄缩小比目标没做成更糟。\n");
+
+        // 已经问过、还没答复的事:不列出来,它每轮都会换一种说法再问一遍。
+        // 实测同一个「域名与备案号」被问了 40 多次,措辞全不一样 —— 指纹去重拦不住,
+        // 只能在源头告诉它「这件事你问过了」。
+        List<Activity> openAsks = escalations.open();
+        sb.append("\n【你已经上报过、创始人还没答复的事(共 ").append(openAsks.size()).append(" 条)】\n");
+        int shown = 0;
+        for (Activity a : openAsks) {
+            if (shown++ >= 8) break;
+            sb.append("- ").append(a.getOccurrences() > 1 ? "(第 " + a.getOccurrences() + " 次) " : "")
+              .append(clip(a.getContent(), 110).replace("\n", " ")).append("\n");
+        }
+        if (openAsks.isEmpty()) sb.append("(没有)\n");
+        sb.append("这些已经在你名下了:不要换一种说法再问一遍 —— 重复上报不会让它更快被答复,"
+                + "只会把真正要看的那条埋掉。只有出现新信息(补了新料、状态变了、结论变了)才再报一次。\n");
 
         // 岗位花名册 + 队列深度(队列满勿派活)
         sb.append("\n【在编岗位(employeeId 用于派活;队列=该岗位待处理+执行中,≥2 勿再派)】\n");
@@ -566,7 +590,13 @@ public class CeoLoopService {
                         case "escalate" -> {
                             String msg = d.path("message").asText("");
                             if (!msg.isBlank()) {
-                                activityRepo.save(new Activity(Activity.ESCALATION, msg, cycleNo));
+                                // CEO 每轮都会把同一件卡住的事再报一遍(它不知道上轮报过)。
+                                // 按「同一目标 + 同一句话」收敛:反复提醒不该变成几十条待办。
+                                long gid = d.path("goalId").asLong(0);
+                                // 按目标收敛而不是按措辞收敛:同一目标下的「请拍板」就是同一件事,
+                                // 换句话说不该变成第二条待办
+                                String key = EscalationService.ofAsk(gid > 0 ? gid : null);
+                                escalations.raise(key, gid > 0 ? gid : null, msg);
                                 escalated++;
                                 pushEscalation();
                             }

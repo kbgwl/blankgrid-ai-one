@@ -86,6 +86,10 @@ export const api = {
   setGoal: (content) => http.post('/ops/goal', { content }).then(r => r.data),
   setFeedback: (content) => http.post('/ops/feedback', { content }).then(r => r.data),
   ackActivity: (id) => http.post(`/ops/${id}/ack`).then(r => r.data),
+  // 一键清掉所有「知道了但没空逐条点」的上报
+  ackAllEscalations: () => http.post('/ops/escalations/ack-all').then(r => r.data),
+  // 手动对账:主体已经不在问题状态的立刻关掉
+  sweepEscalations: () => http.post('/ops/escalations/sweep').then(r => r.data),
   ceoCycle: () => http.post('/ops/ceo-cycle').then(r => r.data),
   backupNow: () => http.post('/ops/backup').then(r => r.data),
   backups: () => http.get('/ops/backups').then(r => r.data),

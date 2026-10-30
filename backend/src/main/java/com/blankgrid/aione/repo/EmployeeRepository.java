@@ -13,4 +13,7 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     List<Employee> findByDepartmentIdOrderByIdAsc(@Param("departmentId") Long departmentId);
 
     List<Employee> findByCeoTrue();
+
+    /** 补历史上报的主体键要用:上报里只写了岗位姓名 */
+    List<Employee> findByNameOrderByIdDesc(String name);
 }

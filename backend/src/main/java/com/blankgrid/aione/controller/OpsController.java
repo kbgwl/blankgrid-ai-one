@@ -18,14 +18,17 @@ public class OpsController {
     private final CeoLoopService ceoLoop;
     private final com.blankgrid.aione.service.BackupService backupService;
     private final com.blankgrid.aione.repo.DecisionTraceRepository traceRepo;
+    private final com.blankgrid.aione.service.EscalationService escalations;
 
     public OpsController(ActivityRepository activityRepo, CeoLoopService ceoLoop,
                          com.blankgrid.aione.service.BackupService backupService,
-                         com.blankgrid.aione.repo.DecisionTraceRepository traceRepo) {
+                         com.blankgrid.aione.repo.DecisionTraceRepository traceRepo,
+                         com.blankgrid.aione.service.EscalationService escalations) {
         this.activityRepo = activityRepo;
         this.ceoLoop = ceoLoop;
         this.backupService = backupService;
         this.traceRepo = traceRepo;
+        this.escalations = escalations;
     }
 
     @GetMapping("/feed")
@@ -98,6 +101,42 @@ public class OpsController {
             activityRepo.save(a);
         });
         return Map.of("ok", true);
+    }
+
+    /**
+     * 现在还成立的上报。已经自己好了的那些不在这里 —— 这是「等多少人拍板」的唯一来源。
+     *
+     * <p>带 occurrences:同一件事反复了多少次。老板要判断「值不值得管」,
+     * 「这事第 92 次了」比「有条上报」有用得多。
+     */
+    @GetMapping("/escalations")
+    public Map<String, Object> openEscalations() {
+        List<Activity> open = escalations.open();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("items", open);
+        m.put("count", open.size());
+        m.put("occurrences", open.stream().mapToInt(Activity::getOccurrences).sum());
+        return m;
+    }
+
+    /** 手动对账一次:主体已经不在问题状态的,立刻关掉 */
+    @PostMapping("/escalations/sweep")
+    public Map<String, Object> sweepEscalations() {
+        int closed = escalations.sweep();
+        return Map.of("ok", true, "closed", closed,
+                "count", activityRepo.countByTypeAndStatus(Activity.ESCALATION, Activity.OPEN));
+    }
+
+    /** 一键已阅:一次清掉所有「知道了但没空逐条点」的 */
+    @PostMapping("/escalations/ack-all")
+    public Map<String, Object> ackAll() {
+        int n = 0;
+        for (Activity a : escalations.open()) {
+            a.setStatus(Activity.ACK);
+            activityRepo.save(a);
+            n++;
+        }
+        return Map.of("ok", true, "acked", n);
     }
 
     /** 手动触发一次数据备份 */
