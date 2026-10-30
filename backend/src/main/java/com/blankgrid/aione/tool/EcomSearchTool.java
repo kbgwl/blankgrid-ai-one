@@ -96,6 +96,15 @@ public class EcomSearchTool implements AiTool {
         return "ecommerce";
     }
 
+    /**
+     * 决策层可用:查价是只读动作。
+     * CEO 拍板"这批货能不能接单"之前自己去核一遍价格,比凭记忆报价可靠。
+     */
+    @Override
+    public boolean decisionSafe() {
+        return true;
+    }
+
     @Override
     public boolean available() {
         SettingsService.Ecom e = settings.get().ecom;

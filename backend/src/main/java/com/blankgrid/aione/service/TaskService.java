@@ -443,6 +443,9 @@ public class TaskService {
                             java.util.function.Consumer<String> onDelta, Long taskId) {
         List<ToolSpec> specs = new ArrayList<>();
         for (com.blankgrid.aione.tool.AiTool t : tools.usable()) {
+            // 被创始人关掉的工具不要出现在声明里:留着它只会让模型白调一次、
+            // 多烧一轮上下文,最后还是拿到"已被关闭"。
+            if (com.blankgrid.aione.service.SettingsService.POLICY_OFF.equals(tools.policyOf(t))) continue;
             specs.add(new ToolSpec(t.name(), t.description(), t.paramsSchema()));
         }
         // 一个工具都没配(新装的库、或密钥还没填):退回纯文本,别白发一段空工具声明

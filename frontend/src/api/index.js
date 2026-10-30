@@ -57,6 +57,13 @@ export const api = {
   }).then(r => r.data),
   // 已注册的工具清单(名字、是否可用、缺什么)。设置页用它告诉用户"还差一步就能用"
   tools: () => http.get('/settings/tools').then(r => r.data),
+  // 工具自主调用:清单(带当前策略)、待批调用、批准/拒绝、REA 自检
+  toolsList: () => http.get('/tools').then(r => r.data),
+  toolApprovals: (scope) => http.get('/tools/approvals', { params: { scope: scope || 'pending' } }).then(r => r.data),
+  approveTool: (id) => http.post(`/tools/approvals/${id}/approve`).then(r => r.data),
+  rejectTool: (id) => http.post(`/tools/approvals/${id}/reject`).then(r => r.data),
+  // REA 自检要真起一次外部进程,npx 首次还要下载包,给足 3 分钟
+  reaTest: () => http.post('/tools/rea/test', {}, { timeout: 180000 }).then(r => r.data),
   // 电商联盟连通性:真去搜一条,比"保存成功"有用 —— 密钥错/没备案都是保存时不报错、干活才 403
   ecomTest: () => http.post('/settings/ecom/test', {}, { timeout: 60000 }).then(r => r.data),
 

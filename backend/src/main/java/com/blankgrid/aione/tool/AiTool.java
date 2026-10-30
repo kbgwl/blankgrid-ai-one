@@ -46,4 +46,32 @@ public interface AiTool {
     default String category() {
         return "general";
     }
+
+    /**
+     * 这个工具默认怎么被调用:auto 全自动 / confirm 需创始人批准 / off 默认关闭。
+     *
+     * <p>默认策略写在工具自己身上,而不是写在全局配置里 —— 加一个新工具时,
+     * "它危不危险"只有写它的人最清楚。设置页只是在默认值之上做覆盖。
+     */
+    default String defaultPolicy() {
+        return "auto";
+    }
+
+    /**
+     * 单次调用的墙钟上限(秒)。工具自己声明,比全局一刀切合理:
+     * 算个式子 5 秒够了,逆向分析一个安装包可能要好几分钟。
+     */
+    default int timeoutSeconds() {
+        return 40;
+    }
+
+    /**
+     * CEO 决策时能不能用这个工具。
+     *
+     * <p>决策层只该看到"查证据"的工具(搜索、计算、逆向分析),
+     * 不该看到"改变状态"的工具 —— 那些应该走决策项由系统执行,留下的才是可审计的动作。
+     */
+    default boolean decisionSafe() {
+        return false;
+    }
 }

@@ -54,6 +54,7 @@ public class CeoLoopService {
     private final TaskService taskService;
     private final LlmService llm;
     private final SettingsService settings;
+    private final com.blankgrid.aione.tool.ToolRegistry toolRegistry;
     private final EventPusher pusher;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -69,7 +70,8 @@ public class CeoLoopService {
                           GoalRepository goalRepo, WorkstreamRepository wsRepo,
                           DeliverableRepository delRepo, GoalService goalService,
                           TaskService taskService, LlmService llm,
-                          SettingsService settings, EventPusher pusher) {
+                          SettingsService settings, EventPusher pusher,
+                          com.blankgrid.aione.tool.ToolRegistry toolRegistry) {
         this.empRepo = empRepo;
         this.taskRepo = taskRepo;
         this.activityRepo = activityRepo;
@@ -82,6 +84,7 @@ public class CeoLoopService {
         this.llm = llm;
         this.settings = settings;
         this.pusher = pusher;
+        this.toolRegistry = toolRegistry;
     }
 
     /** 心跳:按设置里的频率触发自动巡视(间隔可随时在设置页调整) */
@@ -268,6 +271,14 @@ public class CeoLoopService {
             sb.append("\n【公司知识库(含历史经验教训)】\n").append(clip(kb, 900)).append("\n");
         }
 
+        // 拍板前先取证。下面这份上下文是"快照",快照会过期、会缺细节(比如现价、成本、
+        // 某个竞品到底怎么实现)。让 CEO 自己把不确定的部分查清楚再决策,
+        // 比让它对着一段可能过期的摘要凭印象拍板强 —— 这也正是"自主决策"和"按剧本执行"的区别。
+        String evidence = investigate(sys, sb.toString());
+        if (!evidence.isBlank()) {
+            sb.append("\n【你本轮自己查到的证据(工具调用结果,优先于上面的摘要)】\n").append(evidence).append("\n");
+        }
+
         sb.append("\n【你的输出要求】只输出一个 JSON 对象,不要输出任何其他文字:\n");
         sb.append("{\"summary\":\"本轮评估(一两句话)\",\"decisions\":[");
         sb.append("{\"type\":\"dispatch\",\"employeeId\":岗位id,\"instruction\":\"任务指令\",\"contextTaskIds\":[可选,上游任务id数组]},");
@@ -299,12 +310,85 @@ public class CeoLoopService {
         }
 
         List<ChatMessage> messages = List.of(new ChatMessage("system", sys), new ChatMessage("user", sb.toString()));
-        // 巡视拍板是公司的决策中枢:走「设置 → 决策模型」独立槽位,没单独配就跟随主用
+        // 巡视拍板是公司的决策中枢:走「设置 → 决策模型」独立槽位,没单独配就跟随主用。
+        // 决策链路豁免省钱护栏 —— 大脑被换成便宜档,输出照样是像模像样的 JSON,塌了看不出来。
         String cycleModel = settings.decisionModel(null);
-        String reply = llm.chatStream(messages, cycleModel, null, settings.decisionProvider());
+        boolean strong = settings.decisionStrong();
+        String reply = strong
+                ? llm.chatStreamStrong(messages, cycleModel, null, settings.decisionProvider(), false, PLAN_TOKENS)
+                : llm.chatStream(messages, cycleModel, null, settings.decisionProvider(), false, PLAN_TOKENS);
         tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(null, (Long) null, "CEO",
                 llm.tokensUsed(estimateTokens(sb.length() + sys.length() + reply.length())), llm.lastModel()));
         return reply;
+    }
+
+    /** 单次决策输出上限。决策 JSON 里有 summary + 若干条 decisions,4K 在长清单上会写到一半被截断。 */
+    private static final int PLAN_TOKENS = 8000;
+
+    /**
+     * 取证阶段:CEO 在拍板前自己调工具查证据,最多 {@code ceoToolRounds} 轮。
+     *
+     * <p>只给 {@link com.blankgrid.aione.tool.ToolRegistry#decisionTools()} 里的工具 ——
+     * 也就是"只读、查证"这一类。派活、返工、归档这些改状态的动作不允许在取证阶段发生,
+     * 它们必须变成 decisions 里的一条,由系统执行并留审计。这条线一松,
+     * 事后就分不清"CEO 查了什么"和"CEO 做了什么"。
+     *
+     * <p>任何一轮出错都只是少一份证据,不能连累整轮巡视 —— 拍板本身仍然要发生。
+     */
+    private String investigate(String sys, String context) {
+        List<com.blankgrid.aione.tool.AiTool> usable = toolRegistry.decisionTools();
+        int rounds = settings.ceoToolRounds();
+        if (usable.isEmpty() || rounds <= 0) return "";
+
+        List<LlmService.ToolSpec> specs = new ArrayList<>();
+        for (com.blankgrid.aione.tool.AiTool t : usable) {
+            specs.add(new LlmService.ToolSpec(t.name(), t.description(), t.paramsSchema()));
+        }
+
+        List<ChatMessage> msgs = new ArrayList<>();
+        msgs.add(new ChatMessage("system", sys));
+        msgs.add(new ChatMessage("user", context
+                + "\n\n【拍板前先取证】你是 CEO,上面是公司现状的快照。快照会过期、会缺细节。"
+                + "凡是影响本轮决策又拿不准的事实(现价、成本、某个软件/竞品到底怎么实现、某个数算得对不对),"
+                + "先用工具查清楚再拍板。只查真正影响决策的,别为了查而查。"
+                + "查够了就直接给结论,不要输出 JSON —— 下一步会单独要你的决策。\n"
+                + "可用工具:" + String.join("、", specs.stream().map(LlmService.ToolSpec::name).toList())));
+
+        StringBuilder ev = new StringBuilder();
+        String model = settings.decisionModel(null);
+        boolean strong = settings.decisionStrong();
+        int used = 0;
+        for (int i = 0; i < rounds; i++) {
+            LlmService.Turn turn;
+            try {
+                turn = llm.chatWithTools(msgs, model, null, settings.decisionProvider(),
+                        false, 3000, specs, strong);
+            } catch (Exception e) {
+                log.warn("CEO 取证阶段中断:{}", e.getMessage());
+                break;
+            }
+            used += context.length() + (turn.content() == null ? 0 : turn.content().length());
+            tokenRepo.save(new com.blankgrid.aione.entity.TokenLog(null, (Long) null, "CEO",
+                    llm.tokensUsed(estimateTokens(context.length() + 1500)), llm.lastModel()));
+
+            if (!turn.wantsTools()) {
+                if (turn.content() != null && !turn.content().isBlank()) {
+                    ev.append("【你的初步判断】").append(clip(turn.content(), 1500)).append("\n");
+                }
+                break;
+            }
+            msgs.add(new ChatMessage("assistant", turn.content(), turn.toolCalls(), null, null));
+            for (LlmService.ToolCall tc : turn.toolCalls()) {
+                String out = toolRegistry.invoke(tc.name(), tc.arguments(),
+                        new com.blankgrid.aione.tool.ToolContext(null, null, "CEO"), turn.content());
+                msgs.add(ChatMessage.toolResult(tc.id(), tc.name(), out));
+                ev.append("- ").append(tc.name()).append(" (").append(clip(tc.arguments(), 200)).append(")\n  ")
+                  .append(clip(out, 1500)).append("\n");
+            }
+        }
+        if (used > 0) log.info("CEO 取证完成:工具 {} 个,上下文约 {} 字",
+                usable.size(), used);
+        return ev.toString();
     }
 
     /** 解析并执行 CEO 决策 */

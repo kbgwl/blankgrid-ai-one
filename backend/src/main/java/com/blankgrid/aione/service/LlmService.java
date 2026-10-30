@@ -138,6 +138,18 @@ public class LlmService {
     }
 
     /**
+     * 决策链路专用:允许跳过省钱护栏。
+     *
+     * <p>拍板是全公司唯一的大脑。CEO 槽位配了推理模型却被护栏悄悄换成便宜档,
+     * 决策质量塌下来是看不出来的 —— 它照样输出一份像模像样的 JSON,
+     * 只是判断变差了。这种"省了钱、坏了事"的降级必须由调用方显式豁免。
+     */
+    public String chatStreamStrong(List<ChatMessage> messages, String model, Consumer<String> onDelta,
+                                   Provider forced, boolean jsonMode, int maxTokens) {
+        return chatWithTools(messages, model, onDelta, forced, jsonMode, maxTokens, null, true).content();
+    }
+
+    /**
      * 带工具的流式对话。
      *
      * <p>返回 Turn 而不是 String,是因为"说完了"和"要去调工具"是两种不同的结束方式。
@@ -146,6 +158,16 @@ public class LlmService {
      */
     public Turn chatWithTools(List<ChatMessage> messages, String model, Consumer<String> onDelta,
                               Provider forced, boolean jsonMode, int maxTokens, List<ToolSpec> tools) {
+        return chatWithTools(messages, model, onDelta, forced, jsonMode, maxTokens, tools, false);
+    }
+
+    /**
+     * @param skipCheap 跳过省钱护栏。只有决策链路该传 true,其余一律 false ——
+     *                  护栏存在的意义就是拦住各处写死的贵模型,豁免口子开得越少越好。
+     */
+    public Turn chatWithTools(List<ChatMessage> messages, String model, Consumer<String> onDelta,
+                              Provider forced, boolean jsonMode, int maxTokens, List<ToolSpec> tools,
+                              boolean skipCheap) {
         Provider p = forced != null ? forced : settings.primaryProvider();
         if (p == null || p.baseUrl == null || p.baseUrl.isBlank()) {
             throw new IllegalStateException("尚未配置大模型 API,请在「设置」中填写服务商信息");
@@ -153,7 +175,9 @@ public class LlmService {
         String want = (model != null && !model.isBlank()) ? model : p.model;
         // 省钱护栏:不管这个模型名是从员工档案、任务记录还是决策槽位来的,
         // 只要它属于贵的那一档,就在这里换成省钱模型。唯一出口,漏不掉。
-        String useModel = settings.resolveModel(want);
+        // 决策链路可以显式豁免(见 chatStreamStrong)。
+        String useModel = skipCheap && want != null && !want.isBlank()
+                ? want.trim() : settings.resolveModel(want);
         if (useModel == null || useModel.isBlank()) {
             throw new IllegalStateException("尚未配置默认模型,请在「设置」中填写");
         }

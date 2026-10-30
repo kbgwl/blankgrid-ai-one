@@ -317,8 +317,13 @@ public class CompanyEngineService {
         // 默认 4K 的上限装不下"4 条工作流 + 3 条待补事项"的中文描述,写到一半就断,
         // 断在数组里就是"不是有效 JSON",整条生产线卡在第一步。
         String planModel = settings.decisionModel(ceo.getModel());
-        String reply = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
-                planModel, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
+        // 拆解是决策,不是执行:同样豁免省钱护栏,否则配的强模型在拆解这一步被换成便宜档,
+        // 拆出来的工作流质量决定后面所有岗位的产出,省这一步的钱最不划算。
+        String reply = settings.decisionStrong()
+                ? llm.chatStreamStrong(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                        planModel, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS)
+                : llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                        planModel, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
         // 记账用服务商回传的真实用量 + 真实生效的模型名(省钱模式可能把 pro 换成 flash),
         // 否则成本表会把便宜模型的量算成贵模型的钱,越看越吓人。
         tokenRepo.save(new TokenLog(null, goalId, "CEO_PLAN",
@@ -1606,8 +1611,11 @@ public class CompanyEngineService {
                 + "3. 被截断的部分按原意补完,但每条描述压到 80 字以内,确保一次能写完;\n"
                 + "4. 必须有的字段:" + schema + "\n\n原内容:\n" + clip(broken, 12000);
         try {
-            String fixed = llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
-                    model, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
+            String fixed = settings.decisionStrong()
+                    ? llm.chatStreamStrong(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                            model, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS)
+                    : llm.chatStream(List.of(new ChatMessage("system", sys), new ChatMessage("user", user)),
+                            model, null, settings.decisionProvider(), true, PLAN_MAX_TOKENS);
             tokenRepo.save(new TokenLog(null, goalId, "JSON_REPAIR",
                     llm.tokensUsed(CeoLoopService.estimateTokens(sys.length() + user.length() + fixed.length())),
                     llm.lastModel()));

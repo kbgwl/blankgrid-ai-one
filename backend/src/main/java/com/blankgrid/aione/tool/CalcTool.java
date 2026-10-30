@@ -47,6 +47,12 @@ public class CalcTool implements AiTool {
         return "utility";
     }
 
+    /** 纯计算,不改任何状态,决策层可以直接用来核对数字 */
+    @Override
+    public boolean decisionSafe() {
+        return true;
+    }
+
     private static final ObjectMapper M = new ObjectMapper();
 
     @Override

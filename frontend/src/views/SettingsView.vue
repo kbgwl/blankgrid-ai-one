@@ -198,6 +198,109 @@
           </div>
         </section>
 
+        <!-- ===== 自主调用 ===== -->
+        <section id="autonomy" class="set-card glass" :style="{ '--i': 2 }">
+          <div class="set-card-head">
+            <div>
+              <h3>自主调用</h3>
+              <p>模型能自己动手到什么程度:每个工具单独决定「全自动 / 需批准 / 关闭」。</p>
+            </div>
+            <span class="badge" :class="approvalInfo.pending ? 'warn' : 'ok'">
+              {{ approvalInfo.pending ? approvalInfo.pending + ' 条待批' : '无待批调用' }}
+            </span>
+          </div>
+          <div class="set-body">
+            <div class="set-row" :class="{ dirty: dirty('ceoAutoTools') }">
+              <div class="lbl"><b>CEO 拍板前自己取证</b>
+                <span>巡视时先调工具把拿不准的事查清(现价、成本、竞品怎么实现),再决定派活 / 返工 / 归档</span>
+              </div>
+              <div class="ctl"><el-switch v-model="form.ceoAutoTools" /></div>
+            </div>
+            <div class="set-row" :class="{ dirty: dirty('ceoToolRounds') }">
+              <div class="lbl"><b>最多查几轮</b><span>轮数越多越准,也越贵:一轮 = 一次模型调用 + 若干次工具</span></div>
+              <div class="ctl stepper-ctl"><el-input-number v-model="form.ceoToolRounds" :min="1" :max="6" size="small" /><i class="unit">轮</i></div>
+            </div>
+            <div class="set-row" :class="{ dirty: dirty('decisionStrongModel') }">
+              <div class="lbl"><b>决策模型不受省钱降级</b>
+                <span>拍板与目标拆解走决策槽位的原模型;关掉后和普通调用一样会被换成省钱模型</span>
+              </div>
+              <div class="ctl"><el-switch v-model="form.decisionStrongModel" /></div>
+            </div>
+
+            <div class="set-row col">
+              <div class="lbl"><b>工具授权</b>
+                <span>全自动 = 模型直接调;需批准 = 落一条待批单,你点了才执行;关闭 = 从模型的工具清单里彻底消失</span>
+              </div>
+              <div class="tool-grid">
+                <div v-for="t in toolList" :key="t.name" class="tool-row">
+                  <div class="tr-id">
+                    <b>{{ t.name }}</b>
+                    <span :class="{ off: !t.available }">
+                      {{ t.category }} · {{ t.available ? (t.decisionSafe ? 'CEO 可自查' : '仅岗位可用') : t.reason }}
+                    </span>
+                  </div>
+                  <el-select :model-value="policyOf(t)" size="small" style="width: 118px"
+                             @change="v => setPolicy(t, v)">
+                    <el-option label="全自动" value="auto" />
+                    <el-option label="需批准" value="confirm" />
+                    <el-option label="关闭" value="off" />
+                  </el-select>
+                </div>
+                <div v-if="!toolList.length" class="backup-none">还没有注册任何工具。</div>
+              </div>
+            </div>
+
+            <!-- REA 逆向分析 -->
+            <div class="decision-slot" :class="{ dirty: dirty('rea') }">
+              <div class="ds-head">
+                <b>REA 逆向分析</b>
+                <span class="ds-sub">看懂没有源码的软件 —— 反编译引擎取证 + 证据链,github.com/morluto/rea</span>
+                <span class="badge sm" :class="reaState.ok === null ? '' : (reaState.ok ? 'ok' : 'err')">{{ reaState.label }}</span>
+              </div>
+              <div class="prov-grid">
+                <label class="pf check"><span>启用</span><el-switch v-model="form.rea.enabled" /></label>
+                <label class="pf"><span>工作区(安全边界)</span>
+                  <el-input v-model="form.rea.workdir" size="small" placeholder="如 E:\reverse,只能分析这个目录下的目标" />
+                </label>
+                <label class="pf"><span>启动命令</span>
+                  <el-input v-model="form.rea.command" size="small" placeholder="npx -y rea-agents@latest" />
+                </label>
+                <label class="pf check"><span></span>
+                  <el-button size="small" plain :loading="reaState.run" @click="testRea">自检工具链</el-button>
+                </label>
+              </div>
+              <p class="ds-now">
+                命令可以带参数,也可以填本机已装的 <code>rea</code> 路径。
+                首次用 <code>npx</code> 要下载包,会慢一点;分析原生二进制还需额外的 Ghidra 与 JDK。
+                工作区不配置就不允许分析任何路径 —— 模型不该拿到一个绝对路径就能翻整台机器。
+                <span v-if="reaState.detail" class="ds-detail" :class="reaState.ok ? 'ok' : 'err'">{{ reaState.detail }}</span>
+              </p>
+            </div>
+
+            <!-- 待批调用 -->
+            <div class="set-row col">
+              <div class="lbl"><b>待批调用</b>
+                <span>批准会拿原始参数立刻执行一次,结果写进公司动态 —— CEO 下一轮巡视就能读到这份证据</span>
+              </div>
+              <div class="backup-list">
+                <div v-if="!approvalInfo.items.length" class="backup-none">没有待批的调用。</div>
+                <div v-for="a in approvalInfo.items" :key="a.id" class="approval-item">
+                  <div class="ap-top">
+                    <b>{{ a.toolName }}</b>
+                    <span class="ap-meta">{{ a.actor || '系统' }} · {{ fmtAt(a.createdAt) }}</span>
+                  </div>
+                  <div class="ap-args">{{ a.argsJson }}</div>
+                  <div v-if="a.reason" class="ap-reason">{{ a.reason }}</div>
+                  <div class="ap-act">
+                    <button class="fetch-btn" @click="approveCall(a.id)">批准并执行</button>
+                    <button class="fetch-btn danger" @click="rejectCall(a.id)">拒绝</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- ===== 质量与目标 ===== -->
         <section id="quality" class="set-card glass" :style="{ '--i': 1 }">
           <div class="set-card-head">
@@ -391,6 +494,11 @@ const defaults = {
   ceoIntervalMinutes: 15, password: '', qualityBar: '',
   reviewThreshold: 85, maxReviewRounds: 3, autoStartGoals: true,
   decisionProvider: '', decisionModel: '',
+  // 自主调用:策略表 key 支持 工具名 / category:分类 / *。空对象 = 全部走工具自己的默认策略
+  decisionStrongModel: true, ceoAutoTools: true, ceoToolRounds: 2,
+  toolPolicy: {}, toolPolicyDefault: '',
+  // REA 逆向分析:workdir 是安全边界,不配就不允许分析任何路径
+  rea: { enabled: false, command: 'npx -y rea-agents@latest', workdir: '', timeoutSeconds: 240 },
   // 省钱模式:默认开。贵模型单价是便宜档的数倍,先开着,真要高质量再关
   enforceCheap: true, cheapModel: 'deepseek-flash', thinkingOff: true,
   exportDir: '', autoExportArtifacts: true,
@@ -407,6 +515,70 @@ const form = ref({ ...defaults })
 /* 电商联盟:是否已配好密钥、连通性测试结果 */
 const ecomStatus = reactive({ jd: false, tb: false })
 const ecomState = reactive({ run: false, ok: false, detail: '' })
+/* ===== 自主调用:工具授权 / 待批 / REA ===== */
+const toolList = ref([])
+const approvalInfo = reactive({ pending: 0, items: [] })
+const reaState = reactive({ run: false, ok: null, label: '未检测', detail: '' })
+
+/**
+ * 某个工具当前生效的策略。解析顺序必须和后端
+ * SettingsService.toolPolicyFor 一致,否则会出现「页面显示全自动、实际在等批准」。
+ */
+function policyOf(t) {
+  const p = form.value.toolPolicy || {}
+  return p[t.name] || p['category:' + t.category] || p['*']
+    || form.value.toolPolicyDefault || t.defaultPolicy || 'auto'
+}
+function setPolicy(t, v) {
+  if (!form.value.toolPolicy) form.value.toolPolicy = {}
+  // 和工具自己的默认值一致就删掉覆盖项,策略表里只留真的改过的
+  if (v === (t.defaultPolicy || 'auto')) delete form.value.toolPolicy[t.name]
+  else form.value.toolPolicy[t.name] = v
+}
+async function loadTools() {
+  try { toolList.value = await api.toolsList() } catch (e) { /* 工具清单拉不到不影响其它设置 */ }
+}
+async function loadApprovals() {
+  try {
+    const r = await api.toolApprovals('pending')
+    approvalInfo.pending = r.pending || 0
+    approvalInfo.items = r.items || []
+  } catch (e) { /* 没有待批接口也不该让设置页报错 */ }
+}
+async function approveCall(id) {
+  try {
+    const r = await api.approveTool(id)
+    ElMessage({ message: r.message || '已批准', type: r.ok ? 'success' : 'warning', plain: true })
+  } catch (e) { ElMessage.error('批准失败') }
+  loadApprovals()
+}
+async function rejectCall(id) {
+  try {
+    await api.rejectTool(id)
+    ElMessage({ message: '已拒绝', type: 'info', plain: true })
+  } catch (e) { ElMessage.error('操作失败') }
+  loadApprovals()
+}
+/** 自检读的是已保存的配置,所以改完要先保存再点 */
+async function testRea() {
+  reaState.run = true
+  reaState.label = '检测中'
+  reaState.ok = null
+  reaState.detail = ''
+  try {
+    const r = await api.reaTest()
+    reaState.ok = !!r.ok
+    reaState.label = r.ok ? '工具链正常' : '自检未通过'
+    reaState.detail = (r.detail || '').slice(0, 320)
+  } catch (e) {
+    reaState.ok = false
+    reaState.label = '自检失败'
+    reaState.detail = '请求超时或后端未响应。首次 npx 要下载包,可以先在本机跑一次再回来测。'
+  } finally {
+    reaState.run = false
+  }
+}
+
 const base = ref(null)
 const loaded = ref(false)
 const loading = ref(false)
@@ -425,6 +597,7 @@ const probes = reactive({})
 
 const navItems = [
   { id: 'models', label: '模型服务' },
+  { id: 'autonomy', label: '自主调用' },
   { id: 'ecom', label: '电商联盟' },
   { id: 'quality', label: '质量与目标' },
   { id: 'output', label: '成果落盘' },
@@ -643,8 +816,13 @@ async function load() {
   try {
     const s = await api.settings()
     // 后端只回它认识的字段,缺的保留默认值而不是把表单清空。
-    // ecom 是嵌套对象,展开时要单独深合并一次,否则后端加/减一个子字段就整块丢掉。
-    form.value = { ...defaults, ...s, ecom: { ...defaults.ecom, ...(s.ecom || {}) } }
+    // ecom / rea 是嵌套对象,展开时要单独深合并一次,否则后端加/减一个子字段就整块丢掉。
+    form.value = {
+      ...defaults, ...s,
+      ecom: { ...defaults.ecom, ...(s.ecom || {}) },
+      rea: { ...defaults.rea, ...(s.rea || {}) },
+      toolPolicy: { ...(s.toolPolicy || {}) }
+    }
     snapshot()
     refreshEcomStatus()
     loaded.value = true
@@ -681,7 +859,12 @@ async function save() {
   saving.value = true
   try {
     const r = await api.saveSettings(form.value)
-    form.value = { ...defaults, ...r, ecom: { ...defaults.ecom, ...(r.ecom || {}) } }
+    form.value = {
+      ...defaults, ...r,
+      ecom: { ...defaults.ecom, ...(r.ecom || {}) },
+      rea: { ...defaults.rea, ...(r.rea || {}) },
+      toolPolicy: { ...(r.toolPolicy || {}) }
+    }
     snapshot()
     refreshEcomStatus()
     savedFlash.value = true
@@ -753,6 +936,8 @@ onMounted(async () => {
   await load()
   loadBackups()
   loadCost()
+  loadTools()
+  loadApprovals()
 })
 onBeforeUnmount(() => observer && observer.disconnect())
 </script>
@@ -976,6 +1161,35 @@ onBeforeUnmount(() => observer && observer.disconnect())
 }
 .adv-toggle:hover { color: var(--glow-cyan); }
 .adv-toggle i { font-style: normal; }
+
+/* ===== 自主调用:工具授权表 / 待批调用 ===== */
+.tool-grid { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.tool-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 9px 12px; border: 1px solid var(--border-hair); border-radius: 9px;
+  background: rgba(255, 255, 255, .015); transition: border-color .25s var(--ease-quiet);
+}
+.tool-row:hover { border-color: var(--border-hair-strong); }
+.tr-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tr-id b { font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; color: var(--text-dim); }
+.tr-id span { font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.tr-id span.off { color: var(--st-error); opacity: .8; }
+
+.approval-item {
+  display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; margin-bottom: 8px;
+  border: 1px solid var(--border-hair); border-radius: 9px; background: rgba(var(--rgb-warn), .04);
+}
+.ap-top { display: flex; align-items: baseline; gap: 10px; }
+.ap-top b { font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em; }
+.ap-meta { font-size: 11px; color: var(--text-faint); }
+.ap-args {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  word-break: break-all; max-height: 60px; overflow: auto;
+}
+.ap-reason { font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
+.ap-act { display: flex; gap: 8px; }
+.ap-act .fetch-btn { margin: 0; padding: 4px 12px; font-size: 11px; border-radius: 6px; }
+.ap-act .fetch-btn.danger:hover:not(:disabled) { color: var(--st-error); border-color: var(--st-error); }
 
 @media (max-width: 900px) {
   .set-grid { grid-template-columns: 1fr; gap: 12px; }

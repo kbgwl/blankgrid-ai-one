@@ -70,6 +70,33 @@ public class SettingsService {
         }
     }
 
+    /**
+     * REA(Reverse Engineer Anything,github.com/morluto/rea)接入配置。
+     *
+     * <p>REA 本体是一个 MCP 服务 + CLI,自己不反编译,而是驱动 Ghidra/JADX 这类引擎,
+     * 把「读懂一个没有源码的软件」变成 Agent 可以一步步调的调查流程,结论带证据链。
+     * 我们这里走它的 CLI:一条命令拿一份 JSON 证据,不用实现 MCP 客户端。
+     *
+     * <p>workdir 是安全边界:模型只能分析这个目录下的目标,不能拿绝对路径去翻整台机器。
+     */
+    public static class Rea {
+        public boolean enabled = false;
+        /** 启动命令,可带参数。默认走 npx,不用预装;装了全局包可以改成 rea */
+        public String command = "npx -y rea-agents@latest";
+        /** 允许分析的目标根目录;空 = 未配置,工具不可用(不允许全盘扫描) */
+        public String workdir = "";
+        /** 单次分析最多跑多久 */
+        public int timeoutSeconds = 240;
+
+        public boolean ready() {
+            return enabled && notBlank(workdir);
+        }
+
+        private static boolean notBlank(String v) {
+            return v != null && !v.isBlank();
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Settings {
         /** null = 请求没带这个字段(保留原值);空数组 = 明确清空。由 get() 统一补成非 null。 */
@@ -96,6 +123,25 @@ public class SettingsService {
         public Boolean autoExportArtifacts;
         /** 电商联盟(京东/淘宝客)。null = 老配置没这个字段 */
         public Ecom ecom;
+        /**
+         * 工具自动调用策略。key 支持三种写法,按此优先级命中:
+         * 工具名(calc)、分类(category:research)、全局(*)。value = auto / confirm / off。
+         * null = 老配置,全部走工具自己声明的默认策略。
+         */
+        public Map<String, String> toolPolicy;
+        /** 没单独配的工具怎么处理:auto/confirm/off;空 = 用工具自己声明的默认策略 */
+        public String toolPolicyDefault = "";
+        /** CEO 巡视时允许先自己调工具查证据,再拍板(null = 按开启处理) */
+        public Boolean ceoAutoTools;
+        /** CEO 一轮巡视最多调几轮工具。轮数越多越准,也越贵 */
+        public int ceoToolRounds = 2;
+        /**
+         * 决策模型不受省钱护栏降级(null = 按开启处理)。
+         * 拍板是公司唯一的"大脑",被降级成便宜模型后决策质量会直接塌,省下的钱不够赔。
+         */
+        public Boolean decisionStrongModel;
+        /** REA(Reverse Engineer Anything)逆向分析接入。null = 老配置没这个字段 */
+        public Rea rea;
         /** CEO 决策(巡视拍板 + 目标拆解)专用服务商名;null=未提供,空串=跟随主用 */
         public String decisionProvider;
         /** CEO 决策专用模型名;null=未提供,空串=用该服务商默认模型 */
@@ -182,6 +228,11 @@ public class SettingsService {
             if (cache.thinkingOff == null) cache.thinkingOff = Boolean.TRUE;
             if (cache.cheapModel == null || cache.cheapModel.isBlank()) cache.cheapModel = DEFAULT_CHEAP_MODEL;
             if (cache.ecom == null) cache.ecom = new Ecom();
+            if (cache.rea == null) cache.rea = new Rea();
+            if (cache.toolPolicy == null) cache.toolPolicy = new LinkedHashMap<>();
+            if (cache.ceoAutoTools == null) cache.ceoAutoTools = Boolean.TRUE;
+            if (cache.decisionStrongModel == null) cache.decisionStrongModel = Boolean.TRUE;
+            if (cache.ceoToolRounds <= 0) cache.ceoToolRounds = 2;
         }
         return cache;
     }
@@ -216,6 +267,20 @@ public class SettingsService {
         // 决策模型槽位:只在请求真的带了这两个字段时才覆盖(老客户端不传就不会被清空)
         if (incoming.decisionProvider != null) current.decisionProvider = incoming.decisionProvider.trim();
         if (incoming.decisionModel != null) current.decisionModel = incoming.decisionModel.trim();
+        // 自主调用:策略表整表替换(前端每次提交完整映射),其余字段按"带了才覆盖"
+        if (incoming.toolPolicy != null) current.toolPolicy = sanitizePolicy(incoming.toolPolicy);
+        if (incoming.toolPolicyDefault != null) current.toolPolicyDefault = normalizePolicy(incoming.toolPolicyDefault, "");
+        if (incoming.ceoAutoTools != null) current.ceoAutoTools = incoming.ceoAutoTools;
+        if (incoming.ceoToolRounds > 0) current.ceoToolRounds = Math.min(6, incoming.ceoToolRounds);
+        if (incoming.decisionStrongModel != null) current.decisionStrongModel = incoming.decisionStrongModel;
+        if (incoming.rea != null) {
+            if (current.rea == null) current.rea = new Rea();
+            Rea in = incoming.rea;
+            current.rea.enabled = in.enabled;
+            if (in.command != null && !in.command.isBlank()) current.rea.command = in.command.trim();
+            if (in.workdir != null) current.rea.workdir = in.workdir.trim();
+            if (in.timeoutSeconds > 0) current.rea.timeoutSeconds = Math.min(1800, in.timeoutSeconds);
+        }
         // 单价表与 PDF 字体:同样只在请求真带了的时候覆盖,免得老客户端把它清空
         if (incoming.pricing != null) current.pricing = incoming.pricing;
         if (incoming.cheapModel != null) {
@@ -431,6 +496,72 @@ public class SettingsService {
     public String defaultModel() {
         Provider p = primaryProvider();
         return p == null ? "" : (p.model == null ? "" : p.model);
+    }
+
+    // ==================== 工具自动调用策略 ====================
+
+    /** 合法策略值:auto 全自动 / confirm 需创始人批准 / off 禁用 */
+    public static final String POLICY_AUTO = "auto";
+    public static final String POLICY_CONFIRM = "confirm";
+    public static final String POLICY_OFF = "off";
+
+    private static String normalizePolicy(String v, String fallback) {
+        String s = v == null ? "" : v.trim().toLowerCase(java.util.Locale.ROOT);
+        return (POLICY_AUTO.equals(s) || POLICY_CONFIRM.equals(s) || POLICY_OFF.equals(s)) ? s : fallback;
+    }
+
+    private static Map<String, String> sanitizePolicy(Map<String, String> in) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : in.entrySet()) {
+            String k = e.getKey() == null ? "" : e.getKey().trim();
+            if (k.isEmpty()) continue;
+            String v = normalizePolicy(e.getValue(), "");
+            // 空值 = 删掉这条覆盖,回到工具自己的默认策略
+            if (!v.isEmpty()) out.put(k, v);
+        }
+        return out;
+    }
+
+    /**
+     * 某个工具最终该按哪种策略执行。优先级:
+     * 工具名 > 分类(category:xxx) > 全局(*) > 全局默认 > 工具自己声明的默认。
+     *
+     * <p>集中在一处解析,是为了让「能不能自动调」这件事只有一个答案 ——
+     * 散落在调用点上迟早出现"设置里关了、实际还在跑"。
+     */
+    public String toolPolicyFor(String toolName, String category, String toolDefault) {
+        Settings s = get();
+        Map<String, String> map = s.toolPolicy;
+        String v = null;
+        if (map != null) {
+            v = normalizePolicy(map.get(toolName), "");
+            if (v.isEmpty() && category != null && !category.isBlank()) {
+                v = normalizePolicy(map.get("category:" + category), "");
+            }
+            if (v.isEmpty()) v = normalizePolicy(map.get("*"), "");
+        }
+        if (v == null || v.isEmpty()) v = normalizePolicy(s.toolPolicyDefault, "");
+        if (v == null || v.isEmpty()) v = normalizePolicy(toolDefault, POLICY_AUTO);
+        return v;
+    }
+
+    /** CEO 巡视时要不要先自己调工具查证据 */
+    public boolean ceoToolsEnabled() {
+        return !Boolean.FALSE.equals(get().ceoAutoTools);
+    }
+
+    public int ceoToolRounds() {
+        return Math.max(0, Math.min(6, get().ceoToolRounds));
+    }
+
+    /** 决策模型是否跳过省钱护栏。默认 true:拍板质量优先。 */
+    public boolean decisionStrong() {
+        return !Boolean.FALSE.equals(get().decisionStrongModel);
+    }
+
+    public Rea rea() {
+        Rea r = get().rea;
+        return r == null ? new Rea() : r;
     }
 
     // ==================== 省钱模式 ====================
