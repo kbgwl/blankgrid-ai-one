@@ -255,7 +255,7 @@
               <div class="ds-head">
                 <b>REA 逆向分析</b>
                 <span class="ds-sub">看懂没有源码的软件 —— 反编译引擎取证 + 证据链,github.com/morluto/rea</span>
-                <span class="badge sm" :class="reaState.ok === null ? '' : (reaState.ok ? 'ok' : 'err')">{{ reaState.label }}</span>
+                <span class="badge sm" :class="reaState.ok === null ? '' : (reaState.healthy ? 'ok' : 'warn')">{{ reaState.label }}</span>
               </div>
               <div class="prov-grid">
                 <label class="pf check"><span>启用</span><el-switch v-model="form.rea.enabled" /></label>
@@ -273,6 +273,7 @@
                 命令可以带参数,也可以填本机已装的 <code>rea</code> 路径。
                 首次用 <code>npx</code> 要下载包,会慢一点;分析原生二进制还需额外的 Ghidra 与 JDK。
                 工作区不配置就不允许分析任何路径 —— 模型不该拿到一个绝对路径就能翻整台机器。
+                <b>改完先保存,自检读的是已保存的配置。</b>
                 <span v-if="reaState.detail" class="ds-detail" :class="reaState.ok ? 'ok' : 'err'">{{ reaState.detail }}</span>
               </p>
             </div>
@@ -518,7 +519,7 @@ const ecomState = reactive({ run: false, ok: false, detail: '' })
 /* ===== 自主调用:工具授权 / 待批 / REA ===== */
 const toolList = ref([])
 const approvalInfo = reactive({ pending: 0, items: [] })
-const reaState = reactive({ run: false, ok: null, label: '未检测', detail: '' })
+const reaState = reactive({ run: false, ok: null, healthy: false, label: '未检测', detail: '' })
 
 /**
  * 某个工具当前生效的策略。解析顺序必须和后端
@@ -568,7 +569,9 @@ async function testRea() {
   try {
     const r = await api.reaTest()
     reaState.ok = !!r.ok
-    reaState.label = r.ok ? '工具链正常' : '自检未通过'
+    reaState.healthy = !!r.healthy
+    // 三态:命令没跑起来 / 跑起来了但环境缺件 / 全部正常
+    reaState.label = !r.ok ? '自检未通过' : (r.healthy ? '工具链正常' : '有缺项待补')
     reaState.detail = (r.detail || '').slice(0, 320)
   } catch (e) {
     reaState.ok = false

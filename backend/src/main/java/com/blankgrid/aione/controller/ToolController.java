@@ -62,7 +62,12 @@ public class ToolController {
         long t0 = System.currentTimeMillis();
         String detail = reaTool.selfTest();
         Map<String, Object> out = new LinkedHashMap<>(reaTool.status());
-        out.put("ok", detail.startsWith("工具链正常"));
+        // 三态要分清:命令没跑起来 ≠ 跑起来了但环境缺件。
+        // 实测 doctor 在环境不全时也是 exit 1,但它给出的正是一份"缺什么、怎么补"的完整报告。
+        boolean healthy = detail.startsWith("工具链正常");
+        boolean ran = healthy || detail.startsWith("自检完成");
+        out.put("ok", ran);
+        out.put("healthy", healthy);
         out.put("detail", detail);
         out.put("ms", System.currentTimeMillis() - t0);
         return out;

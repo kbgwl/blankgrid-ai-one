@@ -1,5 +1,6 @@
 package com.blankgrid.aione.tool;
 
+import com.blankgrid.aione.service.SettingsService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,5 +77,59 @@ class ReaToolTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> ReaTool.resolveInsideWorkspace("x", tempDir.resolve("nope").toString()));
         assertTrue(e.getMessage().contains("不存在"));
+    }
+
+    // ==================== 结果解析 ====================
+
+    private ReaTool tool() {
+        SettingsService settings = new SettingsService(tempDir.toString());
+        return new ReaTool(settings, tempDir.toString());
+    }
+
+    @Test
+    @DisplayName("REA 的输出是 JSONL:进度行要丢掉,最后那行 Evidence 才是结论")
+    void parsesJsonlEvidence() {
+        // 真实输出是一行一个 JSON(JSONL);下面每行都必须完整,和 CLI 的实际形状一致
+        String raw = """
+                {"rea_progress":{"phase":"analyze_javascript_application","message":"Inventorying and parsing application artifacts","sequence":1}}
+                {"rea_progress":{"phase":"analyze_javascript_application","completed":1,"total":1,"message":"Application graph and Electron boundaries reconstructed","terminal":true,"sequence":2}}
+                {"evidence_id":"ev_1c3b","confidence":"derived","authority":"shipped-artifact","normalized_result":{"statistics":{"relevant_files":5,"parsed_javascript_files":3,"visited_ast_nodes":243,"findings":18},"summary":{"browser_windows":1,"preload_entrypoints":1,"context_bridge_apis":1,"exposed_api_members":1,"native_addon_bindings":0,"ipc":{"operations":2,"literal_channels":1,"main_handlers":1,"renderer_transmissions":1,"paired_renderer_transmissions":1,"dynamic_channel_operations":0}},"graph":{"nodes":[{"observations":[{"label":"electron.ipcRenderer.invoke","properties":{"channel":"search-products"}}]}]},"route_inventory":{"sources":[{"path":"src/main.js"},{"path":"src/preload.js"}]}},"limitations":["CommonJS binding relationships were recovered from inert syntax."]}
+                """;
+
+        String out = tool().summarizeJson(raw, "E:/data/rea/x.json", 1234);
+
+        assertTrue(out.contains("ev_1c3b"), "要带 evidence_id,结论可回溯:" + out);
+        assertTrue(out.contains("窗口 1"), "Electron 结构要能一眼看到:" + out);
+        assertTrue(out.contains("IPC"), out);
+        assertTrue(out.contains("search-products"), "通道名是最能回答'怎么实现'的证据:" + out);
+        assertTrue(out.contains("src/main.js"), out);
+        assertTrue(out.contains("CommonJS"), "要带上结论的边界,不能把推断当事实:" + out);
+        assertTrue(out.contains("最后一步"), out);
+        assertFalse(out.contains("rea_progress"), "进度行不能泄漏给模型");
+    }
+
+    @Test
+    @DisplayName("只有进度没有 Evidence:说清楚,别假装分析成功")
+    void handlesMissingEvidence() {
+        String raw = """
+                {"rea_progress":{"phase":"parse","message":"Parsing src/main.js","sequence":1}}
+                """;
+        String out = tool().summarizeJson(raw, "", 100);
+        assertTrue(out.contains("没有找到 Evidence"), out);
+        assertTrue(out.contains("Parsing src/main.js"), out);
+    }
+
+    @Test
+    @DisplayName("doctor 的报告识别:环境不全时也是 exit 1,但报告本身是有效结论")
+    void recognisesDoctorReport() {
+        String report = """
+                healthy: false
+                environment_healthy: false
+                scope_checks[2]:
+                  - name: node
+                    ok: false
+                """;
+        assertTrue(ReaTool.looksLikeDoctorReport(report));
+        assertFalse(ReaTool.looksLikeDoctorReport("npm ERR! network timeout"));
     }
 }

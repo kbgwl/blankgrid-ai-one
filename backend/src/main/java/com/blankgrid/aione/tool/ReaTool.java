@@ -94,14 +94,16 @@ public class ReaTool implements AiTool {
         SettingsService.Rea conf = settings.rea();
         String action = ACTION_DOCTOR;
         String target = "";
-        try {
-            JsonNode n = mapper.readTree(argsJson == null || argsJson.isBlank() ? "{}" : argsJson);
-            String a = n.path("action").asText("");
-            if (!a.isBlank()) action = a.trim();
-            target = n.path("target").asText("").trim();
-        } catch (Exception e) {
-            return "参数不是合法 JSON:" + e.getMessage() + "。正确形式:{\"action\":\"doctor\"}";
+        JsonNode n = parseArgs(argsJson);
+        if (n == null) {
+            return "参数不是合法 JSON。正确形式:{\"action\":\"doctor\"};"
+                    + "Windows 路径写成正斜杠 E:/apps/demo,或把反斜杠转义成 \\\\。";
         }
+        String a = n.path("action").asText("");
+        if (!a.isBlank()) action = a.trim();
+        target = n.path("target").asText("").trim();
+        // 路径里的 \r / \t 被 JSON 当成转义吃掉时,还原成它们本来该是的分隔符
+        if (target.chars().anyMatch(c -> c < 0x20)) target = restorePathEscapes(target);
 
         List<String> cmd = new ArrayList<>(splitCommand(conf.command));
         if (cmd.isEmpty()) return "REA 的启动命令没配置(设置 → 逆向分析)。";
@@ -140,6 +142,15 @@ public class ReaTool implements AiTool {
         if (r.exit != 0 && !r.stderr.isBlank() && !body.contains(r.stderr)) {
             body = body + "\n" + r.stderr;
         }
+
+        // doctor 的 exit 1 不是"命令失败",是"环境不全健康"——它照样输出了完整诊断。
+        // 当成失败处理,模型就只能看到一句"执行失败",而真正有价值的正是缺哪一项、怎么补。
+        if (ACTION_DOCTOR.equals(action) && looksLikeDoctorReport(body)) {
+            return "REA 工具链自检(" + cost + "ms," + (r.exit == 0 ? "全部正常" : "存在待补项") + "):\n"
+                    + clip(body, 3500)
+                    + "\n只做 JS/Electron 分析的话 node 一项过了就够;原生二进制才需要 ghidra / ida / hopper。";
+        }
+
         if (r.exit != 0) {
             return "REA 执行失败(exit " + r.exit + "," + cost + "ms):\n" + clip(body, 3000)
                     + hintFor(body);
@@ -147,42 +158,180 @@ public class ReaTool implements AiTool {
         return "REA " + action + " 完成(" + cost + "ms):\n" + clip(body, 4000);
     }
 
-    /** 分析结果的压缩:能解析成 JSON 就抽结构,解析不了就截断原文。 */
-    private String summarizeJson(String raw, String savedPath, long cost) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("REA 分析完成(").append(cost).append("ms)。");
-        if (!savedPath.isEmpty()) sb.append("完整结果已存:").append(savedPath).append("\n");
+    /**
+     * 解析模型给的参数。三级兜底,因为模型写 JSON 的手艺不稳定:
+     * 原始 → 修 Windows 路径反斜杠 → LooseJson。
+     *
+     * <p>「E:\reverse\apps\demo」这种值是真实会出现的:模型知道是 Windows 路径,
+     * 但不知道 JSON 里反斜杠要转义。直接判非法,等于把一次分析机会白白丢掉。
+     */
+    private JsonNode parseArgs(String argsJson) {
+        String json = (argsJson == null || argsJson.isBlank()) ? "{}" : argsJson;
         try {
-            JsonNode root = mapper.readTree(raw);
-            JsonNode modules = root.path("modules");
-            if (modules.isArray()) {
-                sb.append("模块 ").append(modules.size()).append(" 个:");
-                int i = 0;
-                for (JsonNode m : modules) {
-                    if (i++ >= 40) { sb.append(" …"); break; }
-                    String name = m.path("path").asText(m.path("name").asText(""));
-                    if (!name.isBlank()) sb.append("\n- ").append(clip(name, 120));
-                }
-                sb.append("\n");
-            }
-            JsonNode imports = root.path("imports");
-            if (imports.isArray() && imports.size() > 0) {
-                sb.append("依赖 ").append(imports.size()).append(" 项:");
-                int i = 0;
-                for (JsonNode m : imports) {
-                    if (i++ >= 30) break;
-                    sb.append(" ").append(clip(m.asText(""), 40));
-                }
-                sb.append("\n");
-            }
-            JsonNode boundaries = root.path("electronBoundaries");
-            if (boundaries.isArray() && boundaries.size() > 0) {
-                sb.append("Electron 边界 ").append(boundaries.size()).append(" 处。\n");
-            }
-            sb.append(clip(raw, 3000));
-        } catch (Exception e) {
-            sb.append(clip(raw, 4000));
+            return mapper.readTree(json);
+        } catch (Exception ignored) {
+            // 往下走
         }
+        try {
+            return mapper.readTree(escapeStrayBackslashes(json));
+        } catch (Exception ignored) {
+            // 往下走
+        }
+        return com.blankgrid.aione.service.LooseJson.parse(mapper, json);
+    }
+
+    /**
+     * 把 JSON 里"不是合法转义"的反斜杠补成双反斜杠。
+     * 合法的只有 " \ / b f n r t u,其余一律按路径分隔符处理。
+     */
+    static String escapeStrayBackslashes(String json) {
+        if (json == null) return "";
+        StringBuilder sb = new StringBuilder(json.length() + 16);
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c != '\\') { sb.append(c); continue; }
+            char next = i + 1 < json.length() ? json.charAt(i + 1) : 0;
+            boolean legal = next == '"' || next == '\\' || next == '/' || next == 'b'
+                    || next == 'f' || next == 'n' || next == 'r' || next == 't' || next == 'u';
+            if (legal) sb.append('\\');
+            else sb.append("\\\\");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 把被 JSON 解析吃成控制字符的路径分隔符还原回 "反斜杠+字母"。
+     *
+     * <p>为什么需要:E:\reverse 里的 \r 是合法 JSON 转义,解析出来是真的回车,
+     * 语法层面无法救。结果就是一个带控制字符的路径,后面必然"路径不存在"。
+     * 与其报一句让人摸不着头脑的错误,不如把它还原成用户/模型本来想写的路径。
+     */
+    static String restorePathEscapes(String s) {
+        if (s == null || s.isEmpty()) return "";
+        return s.replace("\r", "\\r").replace("\n", "\\n")
+                .replace("\t", "\\t").replace("\b", "\\b").replace("\f", "\\f");
+    }
+
+    /** doctor 的报告长这样:YAML/JSON,含 healthy 或 scope_checks。 */
+    static boolean looksLikeDoctorReport(String text) {
+        if (text == null) return false;
+        String low = text.toLowerCase(java.util.Locale.ROOT);
+        return low.contains("scope_checks") || low.contains("environment_healthy")
+                || (low.contains("healthy") && low.contains("node"));
+    }
+
+    /**
+     * 分析结果的压缩。
+     *
+     * <p>REA 的 CLI 输出不是单个 JSON,而是 <b>JSONL</b>:几十行 rea_progress 进度事件,
+     * 最后一行才是 Evidence 对象(evidence_id / normalized_result / limitations)。
+     * 按整段 JSON 解析必然失败,退化成把一堆进度行塞给模型 —— 那等于没分析。
+     *
+     * <p>真正有用的是 normalized_result 里的 summary:窗口数、preload 入口、contextBridge
+     * 暴露了什么、IPC 有几条通道、主进程 handler 几个。这就是"这个软件怎么实现的"的答案骨架,
+     * 带 evidence_id 可以回溯,原文另存一份给人复核。
+     */
+    String summarizeJson(String raw, String savedPath, long cost) {
+        JsonNode evidence = null;
+        String lastProgress = "";
+        for (String line : raw.split("\\R")) {
+            String t = line.trim();
+            if (!t.startsWith("{")) continue;
+            try {
+                JsonNode node = mapper.readTree(t);
+                if (node.has("rea_progress")) {
+                    String msg = node.path("rea_progress").path("message").asText("");
+                    if (!msg.isBlank()) lastProgress = msg;
+                    continue;
+                }
+                if (node.has("evidence_id")) evidence = node;
+            } catch (Exception ignored) {
+                // 进度行偶尔被截断,跳过
+            }
+        }
+
+        // 兜底:有些版本会把 Evidence 作为一个完整 JSON 输出(而不是 JSONL 的最后一行)
+        if (evidence == null) {
+            try {
+                JsonNode whole = mapper.readTree(raw.trim());
+                if (whole.has("evidence_id")) evidence = whole;
+                else if (whole.has("normalized_result")) evidence = whole;
+            } catch (Exception ignored) {
+                // 不是单对象,保持原样走下面的降级分支
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("REA 分析完成(").append(cost).append("ms)。");        if (!savedPath.isEmpty()) sb.append("完整证据已存:").append(savedPath);
+        sb.append("\n");
+        if (!lastProgress.isBlank()) sb.append("最后一步:").append(lastProgress).append("\n");
+
+        if (evidence == null) {
+            sb.append("输出里没有找到 Evidence 对象,下面是原始尾部:\n").append(clip(raw, 3000));
+            return sb.toString();
+        }
+
+        sb.append("evidence_id=").append(evidence.path("evidence_id").asText(""))
+          .append(" · 置信度 ").append(evidence.path("confidence").asText("-"))
+          .append(" · 来源 ").append(evidence.path("authority").asText("-")).append("\n");
+
+        JsonNode nr = evidence.path("normalized_result");
+        JsonNode stats = nr.path("statistics");
+        if (stats.isObject()) {
+            sb.append("【概况】相关文件 ").append(stats.path("relevant_files").asInt(0))
+              .append(" 个 · 解析 JS ").append(stats.path("parsed_javascript_files").asInt(0))
+              .append(" 个 · AST 节点 ").append(stats.path("visited_ast_nodes").asInt(0))
+              .append(" · 发现 ").append(stats.path("findings").asInt(0)).append(" 项\n");
+        }
+
+        JsonNode sum = nr.path("summary");
+        if (sum.isObject()) {
+            sb.append("【Electron 结构】窗口 ").append(sum.path("browser_windows").asInt(0))
+              .append(" · preload 入口 ").append(sum.path("preload_entrypoints").asInt(0))
+              .append(" · contextBridge API ").append(sum.path("context_bridge_apis").asInt(0))
+              .append(" · 对外成员 ").append(sum.path("exposed_api_members").asInt(0))
+              .append(" · 原生插件 ").append(sum.path("native_addon_bindings").asInt(0)).append("\n");
+            JsonNode ipc = sum.path("ipc");
+            if (ipc.isObject()) {
+                sb.append("【IPC】操作 ").append(ipc.path("operations").asInt(0))
+                  .append(" · 字面量通道 ").append(ipc.path("literal_channels").asInt(0))
+                  .append(" · 主进程 handler ").append(ipc.path("main_handlers").asInt(0))
+                  .append(" · 渲染发送 ").append(ipc.path("renderer_transmissions").asInt(0))
+                  .append(" · 已配对 ").append(ipc.path("paired_renderer_transmissions").asInt(0))
+                  .append(" · 动态通道 ").append(ipc.path("dynamic_channel_operations").asInt(0)).append("\n");
+            }
+        }
+
+        // 通道名和调用点是最能直接回答"这个功能怎么实现的"的证据
+        StringBuilder chans = new StringBuilder();
+        for (JsonNode node : nr.path("graph").path("nodes")) {
+            for (JsonNode ob : node.path("observations")) {
+                JsonNode props = ob.path("properties");
+                String ch = props.path("channel").asText("");
+                if (ch.isBlank() || chans.indexOf(ch) >= 0) continue;
+                if (chans.length() > 0) chans.append("、");
+                chans.append(ch).append("(").append(ob.path("label").asText("")).append(")");
+            }
+        }
+        if (chans.length() > 0) sb.append("【观察到的 IPC 通道】").append(clip(chans.toString(), 600)).append("\n");
+
+        JsonNode srcs = nr.path("route_inventory").path("sources");
+        if (srcs.isArray() && srcs.size() > 0) {
+            sb.append("【已分析文件】");
+            int i = 0;
+            for (JsonNode s : srcs) {
+                if (i++ >= 12) { sb.append(" …"); break; }
+                String p = s.path("path").asText("");
+                if (!p.isBlank()) sb.append(i > 1 ? "、" : "").append(p);
+            }
+            sb.append("\n");
+        }
+
+        JsonNode lim = evidence.path("limitations");
+        if (lim.isArray() && lim.size() > 0) {
+            sb.append("【结论的边界】").append(clip(lim.path(0).asText(""), 300)).append("\n");
+        }
+        sb.append("需要更细的节点/关系请说明具体想知道什么(哪条链路、哪个函数)。");
         return sb.toString();
     }
 
@@ -376,6 +525,11 @@ public class ReaTool implements AiTool {
         cmd.add("doctor");
         Result r = run(cmd, Math.min(120, conf.timeoutSeconds));
         String body = r.stdout.isBlank() ? r.stderr : r.stdout;
+        if (looksLikeDoctorReport(body)) {
+            // 命令跑通了:健康与否是报告内容,不是失败
+            String head = r.exit == 0 ? "工具链正常" : "自检完成,有缺项需要补";
+            return head + ":\n" + clip(body, 2000);
+        }
         if (r.exit == 0) return "工具链正常:\n" + clip(body, 1500);
         return "自检失败(exit " + r.exit + "):\n" + clip(body, 1500) + hintFor(body);
     }

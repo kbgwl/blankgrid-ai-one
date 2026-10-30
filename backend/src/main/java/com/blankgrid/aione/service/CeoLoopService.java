@@ -43,6 +43,9 @@ public class CeoLoopService {
 
     private static final Logger log = LoggerFactory.getLogger(CeoLoopService.class);
 
+    /** 单次决策输出上限。决策 JSON 里有 summary + 若干条 decisions,4K 在长清单上会写到一半被截断。 */
+    private static final int PLAN_TOKENS = 8000;
+
     private final EmployeeRepository empRepo;
     private final TaskRepository taskRepo;
     private final ActivityRepository activityRepo;
@@ -321,9 +324,6 @@ public class CeoLoopService {
                 llm.tokensUsed(estimateTokens(sb.length() + sys.length() + reply.length())), llm.lastModel()));
         return reply;
     }
-
-    /** 单次决策输出上限。决策 JSON 里有 summary + 若干条 decisions,4K 在长清单上会写到一半被截断。 */
-    private static final int PLAN_TOKENS = 8000;
 
     /**
      * 取证阶段:CEO 在拍板前自己调工具查证据,最多 {@code ceoToolRounds} 轮。
