@@ -1650,16 +1650,23 @@ public class CompanyEngineService {
      * 从评审意见里挑出最该被记住的一条。
      *
      * <p>评审的 notes 通常是一串编号条目,第一条往往就是最要命的那个问题。
-     * 整段塞进成长档案没有意义(档案只有几百字额度),所以只取第一条实质内容,
-     * 顺手剥掉「1.」「- 」「(1)」这类序号。
+     * 整段塞进成长档案没有意义(档案只有几百字额度),所以只取第一条实质内容。
+     *
+     * <p>要跳过三类"看着像内容其实不是"的行 —— 实测评审第一条就是
+     * 「【必须修改 · 逐条】」这种小标题,直接取会把标题记成教训:
+     * 纯方括号小标题、纯分隔线、以冒号收尾的引导语。
      */
     static String firstIssues(String notes) {
         if (notes == null || notes.isBlank()) return "";
         for (String line : notes.split("\n")) {
             String t = line.replaceAll("^[\\s\\-*·•]+", "")
                           .replaceAll("^[(（]?\\d{1,2}[.、)）]\\s*", "")
+                          .replaceAll("^[【\\[][^】\\]]{0,16}[】\\]]\\s*", "")
                           .strip();
-            if (t.length() >= 6) return t;
+            if (t.length() < 6) continue;
+            if (t.matches("[#=\\-*_\\s]{3,}")) continue;      // 分隔线
+            if (t.endsWith("：") || t.endsWith(":")) continue; // 引导语,正文在下一行
+            return t;
         }
         return notes.strip();
     }

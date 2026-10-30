@@ -98,4 +98,15 @@ class LearningServiceTest {
         assertEquals("", CompanyEngineService.firstIssues(null));
         assertEquals("", CompanyEngineService.firstIssues("   "));
     }
+
+    @Test
+    @DisplayName("小标题、引导语不算教训:实测评审第一行就是「【必须修改 · 逐条】」")
+    void firstIssuesSkipsHeaders() {
+        String notes = "【必须修改 · 逐条】\n1. 验收②模块顺序不通过:设计说明与 HTML 实际顺序不一致\n2. 颜色对比度自相矛盾";
+        String got = CompanyEngineService.firstIssues(notes);
+        assertTrue(got.contains("模块顺序"), got);
+        assertFalse(got.contains("必须修改"), "把标题记成教训了:" + got);
+
+        assertEquals("缺少真实销量数据", CompanyEngineService.firstIssues("具体问题如下：\n缺少真实销量数据"));
+    }
 }
