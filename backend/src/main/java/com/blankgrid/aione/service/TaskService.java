@@ -255,9 +255,14 @@ public class TaskService {
                 for (com.blankgrid.aione.tool.AiTool t : usable) {
                     tip.append("- ").append(t.name()).append(":").append(firstLine(t.description())).append("\n");
                 }
-                tip.append("\n硬性要求:凡涉及**价格、销量、库存、店铺、链接**等外部事实,必须先调用工具查证。")
+                tip.append("\n\n硬性要求:凡涉及**价格、销量、库存、店铺、链接**等外部事实,必须先调用工具查证。")
                    .append("查不到就如实写「未查到」,并在文中说明建议人工核实 —— 绝对不要编造数字、")
                    .append("不要用『约』『大概』来掩盖没有数据。客户会拿着这份东西去下单。");
+                // 模型很爱自作主张"先给骨架,后续分段输出",然后就没有后续了。
+                // 评审收到的是残稿,打回重做又是一轮 —— 这条比任何写作技巧都值钱。
+                tip.append("\n\n交付完整性:一份交付物必须一次写完整。不要自行决定「先给骨架、后续分段输出」,")
+                   .append("不要把该写的代码或条款换成「此处省略」「同上」「参照上文」,")
+                   .append("也不要用「因篇幅所限」收尾。你写不完时系统会自动让你接着写,所以放心往下写。");
                 // 比价单最容易出的不是数字错,是"型号对不上、风险没提、发票没交代"。
                 // 这三件事到了付款环节才被发现,代价就是退不了货。
                 if (usable.stream().anyMatch(t -> "ecom_search".equals(t.name()))) {
@@ -275,10 +280,14 @@ public class TaskService {
             }
             messages.add(new ChatMessage("system", sys));
             if (task.getContextText() != null && !task.getContextText().isEmpty()) {
-                // 上游产出全量透传时,一个任务的输入能有几万字,而其中大部分与本次任务无关。
-                // 超长就保留头尾(结论与收尾常在两端),中间标注省略 —— 既省钱又不丢主线。
+                // 上游产出全量透传时,一个任务的输入能有几万字。
+                //
+                // 裁到 6000 字是省错了地方:输入按 0.5 元/百万 token,多喂一万字不到一分钱,
+                // 而下游看不到完整上游的代价是整轮返工 —— 运维岗拿到被裁掉 11130 字的手册,
+                // 只能一边写一边声明"脚本正文已不在本次输入中",产出的东西自然对不上。
+                // 这里放宽到 2 万字:长交付物基本能完整传下去,成本可以忽略。
                 messages.add(new ChatMessage("user", "以下是上游岗位的产出,作为本次任务的参考输入:\n"
-                        + clipMiddle(task.getContextText(), 6000) + "\n\n请基于以上材料完成任务。"));
+                        + clipMiddle(task.getContextText(), 20000) + "\n\n请基于以上材料完成任务。"));
             }
             messages.add(new ChatMessage("user", task.getInstruction()));
 
@@ -466,22 +475,83 @@ public class TaskService {
 
     /** 续写最多几段。到顶就停,宁可不完整也不能无限烧下去。 */
     static final int MAX_CONTINUE_SEGMENTS = 4;
-    /** 续写后总字数上限。四万字已经远超任何一份正常交付物,再多就是模型在兜圈子。 */
-    static final int CONTINUE_MAX_CHARS = 40000;
+    /**
+     * 续写后总字数上限。
+     *
+     * <p>这个数要跟段数配得上:4 段 × 8000 token 大约能出 8 万字,设成 4 万等于
+     * 一半的段数还没用上就被自己卡停了 —— 实测一份要求三万字的手册写到 40966 字
+     * 正好撞上这个上限,明明还有额度却停了。八万字已经远超任何一份正常交付物。
+     */
+    static final int CONTINUE_MAX_CHARS = 80000;
     /** 发回给模型的已写内容尾部长度。只要够它接上话,不需要看全文 —— 全文会让每段续写的成本翻倍。 */
     static final int CONTINUE_TAIL_CHARS = 1200;
 
     static final String CONTINUE_PROMPT = """
-            你的上一段输出到达单次输出上限被截断了,内容还没写完。
+            你的上一段输出被截断了,内容还没写完。
             请**紧接最后一个字符继续写**:不要重写开头,不要总结前文,不要加「续上」「接上文」这类过渡语,
             不要重复任何已经写过的内容。直接从下一个字符开始输出剩下的部分。
-            如果内容确实已经写完,只输出 [[DONE]] 这四个字符,不要输出别的东西。""";
+
+            判断你是否写完了,只看一件事:任务要求的每一项是否都已经给出完整内容(代码给全、条款给全、条目给够)。
+            全部写完了,就只输出 [[DONE]] 这四个字符,不要输出任何别的东西。
+            没写完就继续写,不要输出 [[DONE]]。""";
 
     /** 模型接话时爱加的废话前缀。留着会印在交付物中间,评审一眼就看出是拼出来的。 */
     private static final String[] CONTINUE_NOISE = {
             "（接上文）", "(接上文)", "（续）", "(续)", "（继续）", "(继续)",
             "接上文：", "接上文:", "续上：", "续上:", "继续：", "继续:"
     };
+
+    /**
+     * 模型自己认输时会写的话。
+     *
+     * <p>比输出上限更常见的一种残稿:token 明明还有,模型写了两三千字就说
+     * 「因篇幅所限,以下省略」「其余部分不再赘述」然后收尾。它没有报错,
+     * finish_reason 也是 stop,看起来一切正常 —— 但交付物还是残的。
+     * 只认结尾,因为正文中间正常提到这些词不算。
+     */
+    private static final String[] OMIT_MARKERS = {
+            "此处省略", "以下省略", "下文省略", "篇幅所限", "受篇幅", "限于篇幅",
+            "因篇幅", "不再赘述", "略去", "此处不再展开", "（略）", "(略)", "省略约"
+    };
+
+    static boolean selfOmitted(String s) {
+        if (s == null || s.isBlank()) return false;
+        String end = tail(s, 1200);
+        for (String m : OMIT_MARKERS) {
+            if (end.contains(m)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 看结尾像不像说到一半断了。
+     *
+     * <p>还有一种残稿既没超上限、也没写「省略」:模型自己认为写完了,
+     * finish_reason 老老实实报 stop,但正文停在一个没闭合的代码块、或者一行缺格的表格里。
+     * 实测就遇到过结尾停在 {@code | } 这种半行表格上,前面却不带任何省略声明 ——
+     * 只靠 finish_reason 判断的话,这份残稿会一路走到评审。
+     */
+    static boolean looksUnfinished(String s) {
+        if (s == null || s.isBlank()) return true;
+        String t = s.stripTrailing();
+        // 代码围栏必须成对,单数个说明有一段代码没写完
+        if (countOf(s, "```") % 2 == 1) return true;
+        int nl = t.lastIndexOf('\n');
+        String last = (nl >= 0 ? t.substring(nl + 1) : t).strip();
+        if (last.isEmpty()) return false;
+        // 表格行只有一根竖线:正常行至少 | a | b |,断在 | 后面就只剩一根
+        if (last.endsWith("|") && countOf(last, "|") < 2) return true;
+        // 悬空的标题符、列表符、分隔线
+        if (last.equals("#") || last.equals("##") || last.equals("###")
+                || last.equals("-") || last.equals("*") || last.equals("|")) return true;
+        return false;
+    }
+
+    private static int countOf(String s, String sub) {
+        int n = 0, i = 0;
+        while ((i = s.indexOf(sub, i)) >= 0) { n++; i += sub.length(); }
+        return n;
+    }
 
     /**
      * 交付物被输出上限截断时,自动接着写。
@@ -496,10 +566,15 @@ public class TaskService {
     private String continueIfTruncated(List<ChatMessage> messages, Task task,
                                        java.util.function.Consumer<String> onDelta,
                                        Long taskId, String first) {
-        if (first == null || first.isBlank() || !llm.lastTruncated()) return first;
+        if (first == null || first.isBlank()) return first;
+        boolean cut = llm.lastTruncated();
+        // 三种残稿都要救:被输出上限切断的、自己写「因篇幅所限」收尾的、以及
+        // 自认为写完但正文停在一半(代码块没闭合、表格缺格)的
+        if (!cut && !selfOmitted(first) && !looksUnfinished(first)) return first;
 
         StringBuilder all = new StringBuilder(first);
-        log.info("任务 {} 正文被截断({} 字),进入续写", taskId, all.length());
+        final String why = cut ? "输出上限截断" : selfOmitted(first) ? "自述省略" : "结尾疑似未完";
+        log.info("任务 {} 正文{} ({} 字),进入续写", taskId, why, all.length());
 
         for (int seg = 1; seg <= MAX_CONTINUE_SEGMENTS; seg++) {
             if (cancelled.contains(taskId)) throw new TaskCancelledException();
@@ -531,9 +606,13 @@ public class TaskService {
             }
             int added = appendWithOverlap(all, more);
             logRepo.save(new TaskLog(task, "info",
-                    "正文被输出上限截断,已自动续写第 " + seg + " 段(+" + added + " 字)"));
-            if (added <= 0) break;              // 没有新内容,再问也是重复
-            if (!llm.lastTruncated()) break;    // 这次写完了,不用再续
+                    "正文不完整(" + why + "),已自动续写第 " + seg + " 段(+" + added + " 字)"));
+            // 几乎没新增:模型手里没内容了,再问也是复读
+            if (added < 200) break;
+            // 这里**故意不看 finish_reason**。实测它会在正文停在半个 `if [[` 时报 stop ——
+            // 拿它当"写完了"的证据,残稿就会一路走到评审。只认模型自己说的 [[DONE]]。
+            cut = llm.lastTruncated();
+            if (all.length() >= CONTINUE_MAX_CHARS) break;
         }
         return all.toString();
     }

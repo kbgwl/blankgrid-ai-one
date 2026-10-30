@@ -31,8 +31,15 @@ public class Task {
     @Column(length = 8000, nullable = false)
     private String instruction;
 
-    /** 输入上下文:引用的其他任务产出,拼接后的文本 */
-    @Column(length = 100000)
+    /**
+     * 输入上下文:引用的其他任务产出,拼接后的文本。
+     *
+     * <p>用 CLOB 不用 VARCHAR:续写功能上线后,一份交付物写到八万字是常态,
+     * 而 VARCHAR(100000) 会在最后一步 save 时抛 "Value too long",
+     * 表现是任务卡在 RUNNING、正文查不到 —— 查起来极费劲。
+     */
+    @Lob
+    @Column(columnDefinition = "CLOB")
     private String contextText = "";
 
     /** 协作链:上游任务 id,逗号分隔 */
@@ -63,10 +70,13 @@ public class Task {
     /** PENDING / RUNNING / DONE / FAILED / CANCELLED */
     private String status = PENDING;
 
-    /** 执行结果(LLM 最终回复) */
-    @Column(length = 100000)
+    /** 执行结果(LLM 最终回复)。同样必须是 CLOB —— 见 contextText 的说明。 */
+    @Lob
+    @Column(columnDefinition = "CLOB")
     private String result = "";
 
+    /** 失败原因。留 2000:异常栈里的 SQL 提示本身就能上千字,截到 255 会把真正的根因切掉 */
+    @Column(length = 2000)
     private String error = "";
 
     private Instant createdAt = Instant.now();

@@ -100,4 +100,46 @@ class TaskContinueTest {
         assertEquals("", TaskService.tail(null, 4));
         assertEquals("", TaskService.tail("", 4));
     }
+
+    @Test
+    @DisplayName("自述省略:结尾写「因篇幅所限」的要被判成残稿")
+    void detectsSelfOmission() {
+        assertTrue(TaskService.selfOmitted("正文正文正文……因篇幅所限,以下省略。"));
+        assertTrue(TaskService.selfOmitted("前面的配置如上,其余部分不再赘述。"));
+        assertTrue(TaskService.selfOmitted("此处省略 5826 字。"));
+        assertTrue(TaskService.selfOmitted("受篇幅限制,附录暂不展开。"));
+    }
+
+    @Test
+    @DisplayName("自述省略:正常收尾不能被误判成残稿")
+    void doesNotOverTrigger() {
+        assertFalse(TaskService.selfOmitted("以上是全部内容,如有疑问请联系运维组。"));
+        assertFalse(TaskService.selfOmitted("# 部署手册\n\n## 一、准备\n\n先确认机器规格。"));
+        assertFalse(TaskService.selfOmitted(""));
+        assertFalse(TaskService.selfOmitted(null));
+        // 关键词出现在正文中间(离结尾很远)不算 —— 正常文章里也可能提到这些词
+        String far = "这里讨论一下「因篇幅所限」这种写法的问题。" + repeat("正文内容。", 400);
+        assertFalse(TaskService.selfOmitted(far), "只在结尾 1200 字内判断");
+    }
+
+    @Test
+    @DisplayName("结尾像断了的:半截表格、未闭合的代码块,都要判成没写完")
+    void detectsUnfinishedEnding() {
+        assertTrue(TaskService.looksUnfinished("| 服务名 | a | b | c |\n| 应用目录 | /opt/a | /opt/b | /opt/c | \n| "),
+                "表格断在一根竖线上");
+        assertTrue(TaskService.looksUnfinished("正常段落。\n```bash\nsystemctl restart app"),
+                "代码围栏没闭合");
+        assertTrue(TaskService.looksUnfinished("## "), "悬空的标题符");
+        assertTrue(TaskService.looksUnfinished(""));
+    }
+
+    @Test
+    @DisplayName("结尾像断了的:正常收尾不能误判")
+    void completeEndingsPass() {
+        assertFalse(TaskService.looksUnfinished("以上是全部配置,如有疑问联系运维。"));
+        assertFalse(TaskService.looksUnfinished("| 服务名 | a | b | c |\n| 应用目录 | /opt/a | /opt/b | /opt/c |"),
+                "完整的表格行有多个竖线,不算断");
+        assertFalse(TaskService.looksUnfinished("说明如下。\n```bash\nsystemctl restart app\n```"));
+        assertFalse(TaskService.looksUnfinished("- 第一条\n- 第二条"));
+    }
 }
