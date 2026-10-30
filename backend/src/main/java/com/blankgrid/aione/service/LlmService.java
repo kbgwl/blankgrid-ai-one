@@ -106,6 +106,62 @@ public class LlmService {
     /** 供界面展示的"最近一次调用"快照:线程无关,别的接口也能读到 */
     private volatile Map<String, Object> lastCall = Map.of();
 
+    /**
+     * 服务商侧故障:重试用尽,或者熔断已经打开。
+     *
+     * <p>单独一个类型,是为了让上层能回答一个必须回答的问题 ——
+     * "这次没交出东西,是这个岗位不行,还是上游坏了?"
+     * 靠错误文字里有没有"503"去猜,迟早猜错;一次猜错就是给一个称职的岗位记上一笔失败。
+     */
+    public static class UnavailableException extends IllegalStateException {
+        private final int attempts;
+
+        public UnavailableException(String message, int attempts) {
+            super(message);
+            this.attempts = attempts;
+        }
+
+        /** 这次一共试了几回(熔断直接拒掉时为 0) */
+        public int attempts() { return attempts; }
+    }
+
+    /** 值得重试的状态码:限流、上游过载、网关错误。4xx 里的参数/鉴权错误重试一万次也一样。 */
+    private static final java.util.Set<Integer> RETRY_STATUS = java.util.Set.of(408, 429, 500, 502, 503, 504);
+    /** 一次调用最多试几次(含首次)。再多就是拿钱和时间赌上游自愈。 */
+    private static final int MAX_ATTEMPTS = 3;
+    /** 重试总预算:退避加起来超过这个数就放弃,别让一个任务卡十分钟。 */
+    private static final long RETRY_BUDGET_MS = 45_000;
+    /** 连续几次「重试用尽」就判定上游整体不可用 */
+    private static final int BREAKER_THRESHOLD = 4;
+    /** 熔断初始冷却;反复失败时翻倍,最长 2 分钟 */
+    private static final long BREAKER_BASE_MS = 20_000;
+    private static final long BREAKER_MAX_MS = 120_000;
+
+    private final java.util.concurrent.atomic.AtomicInteger consecutiveFailures =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** 熔断打开到什么时候(毫秒时间戳) */
+    private volatile long breakerUntil = 0;
+    private volatile String breakerReason = "";
+    private volatile int breakerTrips = 0;
+    /** 最近一次调用试了几回:1 = 一次就成,>1 = 中间有过重试 */
+    private final ThreadLocal<Integer> lastAttempts = ThreadLocal.withInitial(() -> 1);
+
+    /** 上游现在是整体不可用(熔断打开)吗?给状态页/诊断用。 */
+    public boolean breakerOpen() {
+        return System.currentTimeMillis() < breakerUntil;
+    }
+
+    /** 熔断现状快照:冷却还剩几秒、上次撞上什么、今天开了几次。 */
+    public Map<String, Object> breakerInfo() {
+        long left = Math.max(0, breakerUntil - System.currentTimeMillis());
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("open", left > 0);
+        m.put("remainSeconds", left / 1000);
+        m.put("reason", breakerReason);
+        m.put("trips", breakerTrips);
+        return m;
+    }
+
     public LlmService(SettingsService settings,
                       @Value("${aione.data-dir:./data}") String dataDir) {
         this.settings = settings;
@@ -198,12 +254,111 @@ public class LlmService {
     }
 
     /**
+     * 内部信号:这次失败值得再试一遍。不往外抛 —— 外面只该看到两种结论,
+     * 成功了,或者服务商确实不行了。
+     */
+    private static final class RetryableFailure extends Exception {
+        final long retryAfterMs;
+
+        RetryableFailure(String message, long retryAfterMs) {
+            super(message);
+            this.retryAfterMs = retryAfterMs;
+        }
+    }
+
+    /**
+     * 带重试的外壳。
+     *
+     * <p>上游的 503「too busy」和 connection reset 都是几分钟内会自己好的东西。
+     * 以前它们一路抛到任务层,表现是"这个岗位这次没交出东西" —— 一份写到一半的
+     * 正文就这么被当成品送进评审,拿个低分,再花一整轮返工。
+     *
+     * <p>重试有三条硬约束,不是"多试几次"那么简单:
+     * <ol>
+     *   <li>只对 408/429/5xx 和连接类故障重试。参数写错、密钥失效重试一万次也一样,
+     *       白等三轮还会把真正的错误埋掉。</li>
+     *   <li>已经往外吐过字就不重试。流式输出是单向的:前面那几百字已经渲染在界面上、
+     *       甚至写进了正文,重来一遍就是从第二个开头接上,成品里会出现两遍开头。
+     *       宁可这次失败,也不能交一份"重复了两遍"的稿子。</li>
+     *   <li>连续失败到阈值就整体熔断。二十个岗位各试三次,等于朝一个已经趴下的
+     *       服务商同时拍六十个请求 —— 重试反而让它更起不来。</li>
+     * </ol>
+     */
+    private Turn send(Provider p, List<ChatMessage> messages, String useModel, Consumer<String> onDelta,
+                      Opts opts, int downgrades) {
+        long waitBreak = breakerUntil - System.currentTimeMillis();
+        if (waitBreak > 0) {
+            throw new UnavailableException("服务商连续失败,暂停请求 " + (waitBreak / 1000 + 1)
+                    + " 秒后再试(上次原因:" + breakerReason + ")", 0);
+        }
+        long deadline = System.currentTimeMillis() + RETRY_BUDGET_MS;
+        // 一旦吐过字就不能再重来,所以外层得知道这件事
+        final boolean[] spoke = {false};
+        Consumer<String> once = onDelta == null ? null : piece -> {
+            spoke[0] = true;
+            onDelta.accept(piece);
+        };
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Turn turn = attempt(p, messages, useModel, once, opts, downgrades);
+                lastAttempts.set(attempt);
+                consecutiveFailures.set(0);
+                return turn;
+            } catch (RetryableFailure f) {
+                if (spoke[0]) {
+                    // 已经说出去了,重试会产生重复正文 —— 这次就认栽,但不能算岗位的错
+                    throw new UnavailableException("已输出部分内容后连接中断(" + f.getMessage()
+                            + "),为避免正文重复不再重试", attempt);
+                }
+                if (attempt >= MAX_ATTEMPTS || System.currentTimeMillis() >= deadline) {
+                    tripBreaker(f.getMessage());
+                    throw new UnavailableException(f.getMessage() + "(已重试 " + attempt + " 次)", attempt);
+                }
+                long wait = f.retryAfterMs > 0 ? f.retryAfterMs : backoffMs(attempt);
+                if (System.currentTimeMillis() + wait > deadline) {
+                    tripBreaker(f.getMessage());
+                    throw new UnavailableException(f.getMessage() + "(已重试 " + attempt + " 次,重试预算用尽)", attempt);
+                }
+                log.warn("模型调用失败,{} 毫秒后第 {} 次重试:{}", wait, attempt, f.getMessage());
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("重试等待被中断");
+                }
+            }
+        }
+    }
+
+    /** 退避基数。测试里调到几毫秒,否则一次重试用例要真等四秒。 */
+    static volatile long backoffBaseMs = 1000L;
+
+    /** 1 倍 / 3 倍基数递增,带 ±30% 抖动 —— 二十个线程同时被拒,不加抖动就会在同一毫秒再一起撞上去。 */
+    static long backoffMs(int attempt) {
+        long base = backoffBaseMs * (attempt <= 1 ? 1 : 3);
+        double jitter = 0.7 + Math.random() * 0.6;
+        return (long) (base * jitter);
+    }
+
+    private void tripBreaker(String reason) {
+        int fails = consecutiveFailures.incrementAndGet();
+        if (fails < BREAKER_THRESHOLD) return;
+        long cooldown = Math.min(BREAKER_MAX_MS,
+                BREAKER_BASE_MS * (1L << Math.min(3, breakerTrips)));
+        breakerUntil = System.currentTimeMillis() + cooldown;
+        breakerReason = truncate(reason, 160);
+        breakerTrips++;
+        consecutiveFailures.set(0);
+        log.warn("模型服务商连续 {} 次重试用尽,熔断 {} 秒:{}", BREAKER_THRESHOLD, cooldown / 1000, breakerReason);
+    }
+
+    /**
      * @param downgrades 还能降级几次。response_format / max_tokens / stream_options / thinking 都是
      *                   OpenAI 协议的可选扩展,自建网关或老版本服务商可能直接 400。
      *                   撞上了就把这个参数去掉重发,而不是让整条生产线因为"多传了一个字段"停掉。
      */
-    private Turn send(Provider p, List<ChatMessage> messages, String useModel, Consumer<String> onDelta,
-                      Opts opts, int downgrades) {
+    private Turn attempt(Provider p, List<ChatMessage> messages, String useModel, Consumer<String> onDelta,
+                         Opts opts, int downgrades) throws RetryableFailure {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", useModel);
         body.put("stream", true);
@@ -296,8 +451,12 @@ public class LlmService {
                         if (badThink) next.thinkOff = false;
                         if (badTools) next.tools = null;
                         log.info("服务商不支持某个可选字段,去掉后重发:{}", low.length() > 120 ? low.substring(0, 120) : low);
-                        return send(p, messages, useModel, onDelta, next, downgrades - 1);
+                        return attempt(p, messages, useModel, onDelta, next, downgrades - 1);
                     }
+                }
+                if (RETRY_STATUS.contains(resp.statusCode())) {
+                    throw new RetryableFailure("API 返回 " + resp.statusCode() + ": " + truncate(errBody, 300),
+                            retryAfterMs(resp));
                 }
                 throw new IllegalStateException("API 返回 " + resp.statusCode() + ": " + truncate(errBody, 500));
             }
@@ -355,8 +514,15 @@ public class LlmService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("请求被中断");
+        } catch (java.io.UncheckedIOException e) {
+            // 读到一半被掐。HttpClient 把流里的 IOException 包成非受检异常,
+            // 不单独接住的话它会一路冒到任务层,变成一句
+            // "java.io.UncheckedIOException: fixed content-length..." 记在岗位头上。
+            throw new RetryableFailure("读取响应流中断: "
+                    + (e.getCause() == null ? e.getMessage() : e.getCause().getMessage()), 0);
         } catch (IOException e) {
-            throw new IllegalStateException("连接大模型 API 失败: " + e.getMessage(), e);
+            // connection reset、读超时:上游把我掐了。这类重试有意义
+            throw new RetryableFailure("连接大模型 API 失败: " + e.getMessage(), 0);
         }
         lastReasoning.set(truncate(reasoning.toString(), 4000));
 
@@ -377,11 +543,19 @@ public class LlmService {
         snapshot.put("thinkingChars", reasoning.length());
         snapshot.put("finishReason", lastFinishReason.get());
         snapshot.put("toolCalls", calls.size());
+        snapshot.put("attempts", lastAttempts.get());
         lastCall = snapshot;
 
         // 只调工具、不写字是合法的:这时候正文为空不代表出错
         if (full.isEmpty() && calls.isEmpty()) {
-            if (upstreamError[0] != null) throw new IllegalStateException("API 错误: " + truncate(upstreamError[0], 300));
+            if (upstreamError[0] != null) {
+                // 有的网关先回 200 再把错误塞进流里。这种连一个字都没吐出来的,
+                // 重试是安全的 —— 但如果错的是"模型不存在",重试只是白等
+                if (looksTransient(upstreamError[0])) {
+                    throw new RetryableFailure("API 错误: " + truncate(upstreamError[0], 300), 0);
+                }
+                throw new IllegalStateException("API 错误: " + truncate(upstreamError[0], 300));
+            }
             if (reasoning.length() > 0) {
                 dump("empty-content", "model=" + useModel + " finish=" + lastFinishReason.get()
                         + " usage=" + lastUsage.get()[0] + "/" + lastUsage.get()[1]
@@ -395,6 +569,36 @@ public class LlmService {
             throw new IllegalStateException("模型未返回内容");
         }
         return new Turn(full.toString(), calls, lastFinishReason.get());
+    }
+
+    /**
+     * 服务商给的 Retry-After:可能是秒数,也可能是 HTTP 日期。限流时它比自己的退避更准 ——
+     * 人家说了 12 秒后再来,你 1 秒就撞上去只会把冷却重新计时。
+     */
+    private static long retryAfterMs(HttpResponse<?> resp) {
+        String v = resp.headers().firstValue("Retry-After").orElse("").trim();
+        if (v.isEmpty()) return 0;
+        try {
+            return Math.max(0, Math.min(60_000, Long.parseLong(v) * 1000));
+        } catch (NumberFormatException ignored) {
+            // 不是秒数就按 HTTP 日期解;解不出来就算了
+            try {
+                var when = java.time.ZonedDateTime.parse(v, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+                return Math.max(0, Math.min(60_000, when.toInstant().toEpochMilli() - System.currentTimeMillis()));
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+    }
+
+    /** 上游的错原句看起来是"暂时性"的吗?只认明确的过载/限流/超时措辞,别把"模型不存在"也放进来重试。 */
+    static boolean looksTransient(String msg) {
+        if (msg == null) return false;
+        String m = msg.toLowerCase(java.util.Locale.ROOT);
+        return m.contains("too busy") || m.contains("overload") || m.contains("rate limit")
+                || m.contains("rate_limit") || m.contains("timeout") || m.contains("timed out")
+                || m.contains("temporarily") || m.contains("503") || m.contains("502")
+                || m.contains("connection reset") || m.contains("服务繁忙") || m.contains("请稍后");
     }
 
     /** 把异常现场落到 data/diagnose/,下次不用靠猜。 */

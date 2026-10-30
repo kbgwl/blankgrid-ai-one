@@ -103,6 +103,8 @@ export const api = {
   retryDeliverable: (goalId, dId) => http.post(`/goals/${goalId}/deliverables/${dId}/retry`).then(r => r.data),
   // 追加返工轮次:上限 +1,不是清零。返工用尽后"差一口气"的成果用它
   grantRound: (goalId, dId, rounds, reason) => http.post(`/goals/${goalId}/deliverables/${dId}/grant-rounds`, { rounds: rounds || 1, reason: reason || '' }).then(r => r.data),
+  // 砍掉一项交付:目标按剩下的项结项。必须带理由 —— 砍掉是决策,事后要能查为什么
+  cancelDeliverable: (goalId, dId, reason) => http.post(`/goals/${goalId}/deliverables/${dId}/cancel`, { reason: reason || '' }).then(r => r.data),
   // 一次性把受阻/挂起的交付物全部推回队列:充值、换模型、重启之后不必逐条点重试
   retryBlocked: (goalId) => http.post(`/goals/${goalId}/retry-blocked`).then(r => r.data),
   provideInputs: (goalId, facts) => http.post(`/goals/${goalId}/inputs`, { facts }).then(r => r.data),

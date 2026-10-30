@@ -385,20 +385,30 @@ public class TaskService {
             pushEmployee(emp);
             publisher.publishEvent(new TaskFinishedEvent(taskId, false, ce.getMessage()));
         } catch (Exception e) {
+            // 服务商侧故障和"这个岗位没干好"必须分开。混在一起处理会连坐:
+            // 通用失败分支会派复盘任务,而复盘本身还得调同一个坏掉的服务商;
+            // checkCircuit 又会把连续失败累加,三次就把岗位叫停。
+            // 一次 503 风暴足够把整个团队逐一点名 —— 那不是治理,那是雪崩。
+            boolean infra = e instanceof LlmService.UnavailableException;
             task.setStatus(Task.FAILED);
-            task.setError(e.getMessage());
+            task.setError(infra ? "服务商故障,非岗位问题:" + e.getMessage() : e.getMessage());
             task.setFinishedAt(Instant.now());
             taskRepo.save(task);
-            logRepo.save(new TaskLog(task, "error", e.getMessage()));
-            emp.setStatus(Employee.STATUS_ERROR);
+            logRepo.save(new TaskLog(task, "error", task.getError()));
+            // 上游坏了不等于它在犯错,别让它挂着"错误"状态待在看板上
+            emp.setStatus(infra ? Employee.STATUS_IDLE : Employee.STATUS_ERROR);
             emp.setCurrentTaskSummary("");
             empRepo.save(emp);
             pushTask(task);
             pushEmployee(emp);
 
-            // 目标体系内的任务由目标引擎按验收/返工规则处理,避免与自动复盘互相抢占队列
-            if (task.getGoalId() == null) selfLearning(task, emp);
-            publisher.publishEvent(new TaskFinishedEvent(taskId, false, e.getMessage()));
+            if (infra) {
+                log.warn("任务 {} 因模型服务商故障中断,不计入岗位失败:{}", taskId, clip(e.getMessage(), 120));
+            } else if (task.getGoalId() == null) {
+                // 目标体系内的任务由目标引擎按验收/返工规则处理,避免与自动复盘互相抢占队列
+                selfLearning(task, emp);
+            }
+            publisher.publishEvent(new TaskFinishedEvent(taskId, false, task.getError()));
         }
     }
 
@@ -616,8 +626,14 @@ public class TaskService {
             try {
                 more = llm.chatStream(cont, task.getModel(), onDelta, null, false, EXEC_MAX_TOKENS);
             } catch (Exception ex) {
-                // 续写失败不能毁掉已有的半份成果:拿到多少算多少,评审至少还有东西看
-                log.warn("任务 {} 续写第 {} 段失败:{}", taskId, seg, ex.getMessage());
+                // 续写失败不能毁掉已有的半份成果:拿到多少算多少,评审至少还有东西看。
+                // 但必须在任务日志里说清"这是断了,不是写完了" —— 否则评审拿到的是一份
+                // 结尾突兀的稿子,只会判"写到一半",接着白烧一轮返工。
+                boolean infra = ex instanceof LlmService.UnavailableException;
+                log.warn("任务 {} 续写第 {} 段失败{}:{}", taskId, seg, infra ? "(服务商故障)" : "", ex.getMessage());
+                logRepo.save(new TaskLog(task, "info", "续写第 " + seg + " 段中断"
+                        + (infra ? "(模型服务商故障,非写作问题)" : "")
+                        + ",当前正文 " + all.length() + " 字,可能不完整:" + clip(ex.getMessage(), 160)));
                 break;
             }
             // 每段单独记账。tokensUsed 只反映最后一次调用,不单独记就会把续写的钱算丢

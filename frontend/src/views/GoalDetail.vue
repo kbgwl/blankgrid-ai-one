@@ -203,7 +203,7 @@
                       </span>
                       <span v-if="depText(d)">依赖 {{ depText(d) }}</span>
                     </div>
-                    <p class="d-notes" v-if="(d.status === 'BLOCKED' || d.status === 'WAITING') && d.reviewNotes">{{ d.reviewNotes }}</p>
+                    <p class="d-notes" v-if="(d.status === 'BLOCKED' || d.status === 'WAITING' || d.status === 'CANCELLED') && d.reviewNotes">{{ d.reviewNotes }}</p>
                   </div>
                   <div class="d-actions">
                     <el-button v-if="artifactOf(d)" text size="small" class="d-art" @click="openArtifact(artifactOf(d))">
@@ -216,6 +216,10 @@
                     <el-button v-if="d.status === 'BLOCKED'" text size="small" class="d-retry"
                                title="上限 +1 轮,历史轮次仍算数 —— 差一口气的成果用这个,不要用重试" @click="grantRound(d)">
                       再给一轮
+                    </el-button>
+                    <el-button v-if="d.status === 'BLOCKED' || d.status === 'WAITING'" text size="small" class="d-drop"
+                               title="不再投入这项。目标按剩下的项结项,砍掉的不计入完成度" @click="dropDeliverable(d)">
+                      砍掉
                     </el-button>
                   </div>
                 </div>
@@ -419,7 +423,7 @@ const statusText = computed(() => statusMap[goal.value.status] || goal.value.sta
 
 const dsMap = {
   PENDING: '待开始', READY: '待执行', RUNNING: '执行中', REVIEW: '评审中',
-  REWORK: '返工中', DONE: '已完成', BLOCKED: '受阻', WAITING: '等上游', CANCELLED: '已取消'
+  REWORK: '返工中', DONE: '已完成', BLOCKED: '受阻', WAITING: '等上游', CANCELLED: '已砍掉'
 }
 const wsMap = { PLANNING: '拆解中', ACTIVE: '推进中', DONE: '已完成', BLOCKED: '受阻', PAUSED: '已暂停' }
 const artMap = { DRAFT: '草稿', REVIEW: '待评审', APPROVED: '已通过', REJECTED: '未通过' }
@@ -632,6 +636,29 @@ async function grantRound(d) {
     ElMessage({ message: `已追加 1 轮,上限提到 ${r.cap} 轮`, type: 'success', plain: true })
     await load()
   } catch (e) { ElMessage.error(e.response?.data?.error || '追加失败') } finally { acting.value = false }
+}
+
+// 砍掉一项:目标结项的前提是"所有交付要么通过、要么砍掉"。
+// 没有这个出口,一项反复不过的活能把整个目标永久钉在 REVIEW 上 —— 剩下的干得再好也没用。
+// 所以要理由:砍掉是决策,不是删除,事后得能回答"当时为什么不做这件事"。
+async function dropDeliverable(d) {
+  let reason = ''
+  try {
+    const r = await ElMessageBox.prompt(
+      `砍掉「${d.title}」后不再投入这项,目标按剩下的项结项。写一句理由,事后才查得到当时怎么想的。`,
+      '砍掉这项', {
+        confirmButtonText: '确认砍掉', cancelButtonText: '再想想',
+        inputPlaceholder: '例如:依赖的外部接口不开放,这项对目标不是关键路径',
+        inputValidator: (v) => (v && v.trim().length >= 2) || '理由不能为空 —— 一句话就行',
+      })
+    reason = r.value
+  } catch (e) { return }
+  acting.value = true
+  try {
+    await api.cancelDeliverable(goal.value.id, d.id, reason)
+    ElMessage({ message: '已砍掉,不再计入完成度', type: 'success', plain: true })
+    await load()
+  } catch (e) { ElMessage.error(e.response?.data?.error || '操作失败') } finally { acting.value = false }
 }
 
 async function retryAllBlocked() {
@@ -962,6 +989,12 @@ onBeforeUnmount(() => {
 .d-vers:hover { color: var(--glow-cyan); }
 .d-art { color: var(--glow-cyan-dim); font-size: 11px; }
 .d-retry { color: var(--st-warn); font-size: 11px; }
+/* 砍掉不是红色告警,是个平静的决定:压暗但留在原地,理由还能点开看 */
+.d-drop { color: var(--st-idle); font-size: 11px; }
+.d-drop:hover { color: var(--st-error); }
+.delivery.ds-cancelled { opacity: .62; }
+.delivery.ds-cancelled .d-title { text-decoration: line-through; text-decoration-thickness: 1px; }
+.delivery.ds-cancelled .d-notes { opacity: .9; }
 .stream-foot { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border-hair); }
 .af-label { font-size: 9.5px; letter-spacing: .16em; color: var(--text-faint); }
 .stream-foot p { margin: 6px 0 0; font-size: 11.5px; line-height: 1.8; color: var(--text-dim); white-space: pre-wrap; }

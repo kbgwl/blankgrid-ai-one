@@ -175,6 +175,24 @@ public class CompanyEngineService {
     }
 
     /**
+     * 砍掉一项之后重算结项。
+     *
+     * <p>砍掉可能正好让目标"全部了结",也可能还差几项 —— 判断规则只有这一处,
+     * 不要在砍掉的入口再抄一遍。
+     */
+    @org.springframework.context.event.EventListener(DeliverableSettledEvent.class)
+    public void onDeliverableSettled(DeliverableSettledEvent event) {
+        try {
+            Goal g = goalRepo.findById(event.goalId()).orElse(null);
+            if (g == null) return;
+            checkGoalCompletion(g);
+            pushGoal(event.goalId());
+        } catch (Exception e) {
+            log.error("处理交付了结事件失败", e);
+        }
+    }
+
+    /**
      * 进程重启后,上一次运行里"正在执行"的任务其实已经没人管了:它们不会自己变 DONE,
      * 交付物就会永远停在 RUNNING 还占着并发名额,整条线看起来"卡住了"却没有报错。
      * 所以启动时先把这些孤儿任务标成中断,把对应交付物放回队列 ——
@@ -1105,9 +1123,13 @@ public class CompanyEngineService {
     private void checkGoalCompletion(Goal g) {
         List<Deliverable> ds = delRepo.findByGoalIdOrderBySortOrderAscIdAsc(g.getId());
         if (ds.isEmpty()) return;
-        boolean allDone = ds.stream().allMatch(d -> Deliverable.DONE.equals(d.getStatus()));
-        if (!allDone) return;
+        long done = ds.stream().filter(d -> Deliverable.DONE.equals(d.getStatus())).count();
+        long cancelled = ds.stream().filter(d -> Deliverable.CANCELLED.equals(d.getStatus())).count();
+        // 砍掉的算"了结",不算"未完成" —— 否则砍掉等于白砍,目标还是永远结不了。
+        // 但全部砍光不算达成:那是一个被清空的目标,不该出现在成果库里。
+        if (done + cancelled != ds.size() || done == 0) return;
         if (Goal.DONE.equals(g.getStatus()) || Goal.PAUSED.equals(g.getStatus())) return;
+        String scope = cancelled > 0 ? "(" + done + " 项通过," + cancelled + " 项按决策砍掉)" : "";
 
         Goal fresh = goalRepo.findById(g.getId()).orElse(g);
         goalService.refreshProgress(fresh.getId());
@@ -1117,11 +1139,11 @@ public class CompanyEngineService {
         if (avg >= threshold) {
             fresh.setStatus(Goal.DONE);
             fresh.setProgress(100);
-            fresh.setCeoSummary("目标完成:全部 " + ds.size() + " 项交付通过评审,均分 " + avg + "。");
+            fresh.setCeoSummary("目标完成:" + done + " 项交付通过评审" + scope + ",均分 " + avg + "。");
             fresh.setUpdatedAt(Instant.now());
             goalRepo.save(fresh);
-            activity(Activity.REPORT, "目标「" + fresh.getTitle() + "」达成。全部 " + ds.size()
-                    + " 项交付通过评审,均分 " + avg + "。成果已归档,可一键导出。", fresh.getId());
+            activity(Activity.REPORT, "目标「" + fresh.getTitle() + "」达成。" + done
+                    + " 项交付通过评审" + scope + ",均分 " + avg + "。成果已归档,可一键导出。", fresh.getId());
             String dir = exportService.autoExportGoal(fresh.getId());
             if (dir != null) {
                 activity(Activity.REPORT, "成果已落盘到:" + dir, fresh.getId());

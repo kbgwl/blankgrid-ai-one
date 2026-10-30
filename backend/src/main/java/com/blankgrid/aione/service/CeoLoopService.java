@@ -254,6 +254,10 @@ public class CeoLoopService {
             }
         }
         if (blockedShown == 0) sb.append("(没有停摆的交付物)\n");
+        // 砍掉是创始人的权力,但"该不该砍"只有天天盯现场的人看得出来。
+        // 给它一个说出来的通道,总比它默默把同一项再推三轮、或者干脆不提这件事好。
+        sb.append("其中确实不值得再投入的,可以用 escalate 提出砍掉的建议(写明 deliverableId 和理由);"
+                + "你没有权力自己砍 —— 目标被悄悄缩小比目标没做成更糟。\n");
 
         // 岗位花名册 + 队列深度(队列满勿派活)
         sb.append("\n【在编岗位(employeeId 用于派活;队列=该岗位待处理+执行中,≥2 勿再派)】\n");
@@ -323,6 +327,8 @@ public class CeoLoopService {
         sb.append(" 派活要有节制:队列满勿派;无必要不派;评估优先。dispatch 可带 contextTaskIds 引用上游任务产出,让岗位基于已有成果工作。");
         sb.append(" grant_rounds 是「返工用尽」之后的唯一自主手段:只在「问题机械可修、且这份成果缺了它整条线就断」时用,一轮最多 3 条。"
                 + " 反复追加同一份没有意义 —— 三轮之后还不过,就该 escalate 让创始人决定收还是弃。");
+        sb.append(" 判断一项该砍的标准是「再投两轮也不会改变结论」:外部依赖拿不到、要求本身自相矛盾、"
+                + "或者这项对目标只是锦上添花。理由要具体到差在哪儿,不要只说「质量不达标」。");
 
         if (weekly) {
             // 周报:过去 7 天的汇报摘要
@@ -416,6 +422,9 @@ public class CeoLoopService {
                         false, 3000, specs, strong);
             } catch (Exception e) {
                 log.warn("CEO 取证阶段中断:{}", e.getMessage());
+                // 取证断了,决策却不会因此停下 —— 那就必须让留档说出"这轮证据不全"。
+                // 否则事后翻记录,看到的是一次完整取证加一个果断结论,分不清哪句是瞎猜的。
+                ev.append("【取证中断】").append(clip(e.getMessage(), 200)).append("\n");
                 break;
             }
             used += context.length() + (turn.content() == null ? 0 : turn.content().length());

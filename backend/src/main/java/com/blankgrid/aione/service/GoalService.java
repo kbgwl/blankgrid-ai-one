@@ -265,9 +265,12 @@ public class GoalService {
         Goal g = goalRepo.findById(goalId).orElse(null);
         if (g == null) return Map.of();
         List<Deliverable> ds = delRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId);
+        // 砍掉的不进分母。否则"砍掉一项"会把进度从 80% 拉到 70%,
+        // 谁还敢砍?越舍不得砍,目标越结不了。
+        long active = ds.stream().filter(d -> !Deliverable.CANCELLED.equals(d.getStatus())).count();
         long done = ds.stream().filter(d -> Deliverable.DONE.equals(d.getStatus())).count();
         int progress = ds.isEmpty() ? (wsRepo.countByGoalId(goalId) > 0 ? 8 : 0)
-                : (int) Math.round(done * 100.0 / ds.size());
+                : (active == 0 ? 100 : (int) Math.round(done * 100.0 / active));
         g.setProgress(Math.min(100, progress));
         List<Artifact> approved = artRepo.findByGoalIdAndStatusOrderByScoreDesc(goalId, Artifact.APPROVED);
         int avg = approved.isEmpty() ? 0
@@ -280,8 +283,9 @@ public class GoalService {
         for (Workstream ws : wsRepo.findByGoalIdOrderBySortOrderAscIdAsc(goalId)) {
             List<Deliverable> wds = delRepo.findByWorkstreamIdOrderBySortOrderAscIdAsc(ws.getId());
             long wdone = wds.stream().filter(d -> Deliverable.DONE.equals(d.getStatus())).count();
-            ws.setProgress(wds.isEmpty() ? 0 : (int) Math.round(wdone * 100.0 / wds.size()));
-            if (!wds.isEmpty() && wdone == wds.size() && !Workstream.PAUSED.equals(ws.getStatus())) {
+            long wactive = wds.stream().filter(d -> !Deliverable.CANCELLED.equals(d.getStatus())).count();
+            ws.setProgress(wds.isEmpty() ? 0 : (wactive == 0 ? 100 : (int) Math.round(wdone * 100.0 / wactive)));
+            if (!wds.isEmpty() && wdone == wactive && !Workstream.PAUSED.equals(ws.getStatus())) {
                 ws.setStatus(Workstream.DONE);
             } else if (!wds.isEmpty() && !Workstream.DONE.equals(ws.getStatus()) && !Workstream.PAUSED.equals(ws.getStatus())) {
                 ws.setStatus(Workstream.ACTIVE);
@@ -302,21 +306,80 @@ public class GoalService {
     @Transactional
     public Goal accept(Long id) {
         Goal g = goalRepo.findById(id).orElseThrow(() -> new IllegalArgumentException("目标不存在"));
-        long total = delRepo.countByGoalId(id);
-        long done = delRepo.countByGoalIdAndStatus(id, Deliverable.DONE);
-        if (total > 0 && done < total) {
-            throw new IllegalArgumentException("还有 " + (total - done) + " 项交付未通过,不能归档");
+        List<Deliverable> ds = delRepo.findByGoalIdOrderBySortOrderAscIdAsc(id);
+        long done = ds.stream().filter(d -> Deliverable.DONE.equals(d.getStatus())).count();
+        long cancelled = ds.stream().filter(d -> Deliverable.CANCELLED.equals(d.getStatus())).count();
+        long pending = ds.size() - done - cancelled;
+        if (pending > 0) {
+            throw new IllegalArgumentException("还有 " + pending + " 项交付未通过,不能归档");
         }
         g.setStatus(Goal.DONE);
         g.setProgress(100);
         g.setUpdatedAt(Instant.now());
         goalRepo.save(g);
         Goal finalG = g;
-        Activity a = new Activity(Activity.REPORT, "创始人复核通过,目标「" + g.getTitle() + "」已归档。", null);
+        Activity a = new Activity(Activity.REPORT, "创始人复核通过,目标「" + g.getTitle() + "」已归档"
+                + (cancelled > 0 ? "(其中 " + cancelled + " 项已砍掉,不计入完成度)" : "") + "。", null);
         a.setGoalId(id);
         activityRepo.save(a);
         push(finalG);
         return finalG;
+    }
+
+    /**
+     * 砍掉一项交付。
+     *
+     * <p>为什么必须有这个动作:目标要结项,前提是所有交付都通过评审。只要有一项
+     * 反复不过或彻底卡死,这个目标就永远结不了 —— 不是"质量不够所以不结",
+     * 而是**结构上不可能结**。剩下的活干得再好也白干。
+     *
+     * <p>真实的管理不是"每件事都必须做成",而是"判断哪件不值得再做,然后明确砍掉,
+     * 留下理由"。砍掉是决策,不是失败 —— 所以这条要进公司动态,并且带着理由。
+     *
+     * <p>正在执行的不能砍:它跑完的成果没人接,而任务还在烧钱。
+     */
+    @Transactional
+    public Deliverable cancelDeliverable(Long goalId, Long deliverableId, String reason) {
+        Deliverable d = delRepo.findById(deliverableId)
+                .orElseThrow(() -> new IllegalArgumentException("交付物不存在"));
+        if (d.getGoal() == null || !goalId.equals(d.getGoal().getId())) {
+            throw new IllegalArgumentException("交付物不属于该目标");
+        }
+        if (Deliverable.DONE.equals(d.getStatus())) {
+            throw new IllegalArgumentException("这项已经通过评审了,不能砍");
+        }
+        if (Deliverable.CANCELLED.equals(d.getStatus())) return d;
+        if (Deliverable.RUNNING.equals(d.getStatus())) {
+            throw new IllegalArgumentException("这项正在执行,等它跑完再决定 —— 现在砍掉,它跑出来的成果没人接");
+        }
+        String why = (reason == null || reason.isBlank()) ? "未写明理由" : reason.trim();
+        // 原评审意见要留着:砍掉之后回头看"当时差在哪",这是唯一还能查到的线索
+        String note = "已砍掉:" + why;
+        if (d.getReviewNotes() != null && !d.getReviewNotes().isBlank()) {
+            note += "｜原评审意见:" + d.getReviewNotes();
+        }
+        d.setStatus(Deliverable.CANCELLED);
+        d.setCurrentTaskId(null);
+        d.setReviewNotes(note.length() > 2000 ? note.substring(0, 2000) + "…" : note);
+        d.setUpdatedAt(Instant.now());
+        delRepo.save(d);
+
+        Activity a = new Activity(Activity.REPORT,
+                "砍掉「" + d.getTitle() + "」:" + why + "。这项不再计入目标完成度。", null);
+        a.setGoalId(goalId);
+        activityRepo.save(a);
+        refreshProgress(goalId);
+
+        Goal g = goalRepo.findById(goalId).orElse(null);
+        if (g == null) return d;
+        if (Goal.PAUSED.equals(g.getStatus())) {
+            // 暂停中的目标不因为"砍掉一项"就被悄悄恢复:暂停是"先别花钱",不是"活干完了"。
+            // 恢复与否是创始人的决定,一次删减不该替他做。
+            return d;
+        }
+        // 剩下的是否已经全部了结,交给引擎判 —— 均分、归档、导出那一套规则只该有一处
+        publisher.publishEvent(new DeliverableSettledEvent(goalId));
+        return d;
     }
 
     /** 重试单个受阻交付物。 */

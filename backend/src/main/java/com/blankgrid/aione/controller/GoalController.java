@@ -166,6 +166,23 @@ public class GoalController {
     }
 
     /**
+     * 砍掉一项交付。
+     *
+     * <p>目标结项的前提是"所有交付要么通过、要么砍掉"。没有这个出口,
+     * 一项反复不过的活就能把整个目标永久钉在 REVIEW 上 —— 剩下的干得再好也没用。
+     */
+    @PostMapping("/{id}/deliverables/{deliverableId}/cancel")
+    public Map<String, Object> cancelDeliverable(@PathVariable Long id, @PathVariable Long deliverableId,
+                                                 @RequestBody(required = false) CancelBody body) {
+        var d = goals.cancelDeliverable(id, deliverableId, body == null ? null : body.reason);
+        return Map.of("ok", true, "status", d.getStatus());
+    }
+
+    public static class CancelBody {
+        public String reason = "";
+    }
+
+    /**
      * 打包下载:默认 zip(原样的 Markdown 工程包);
      * ?format=docx|pdf|pptx 则整本项目合成一个文件直接下载。
      */
