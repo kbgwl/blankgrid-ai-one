@@ -393,6 +393,36 @@ public class ReaTool implements AiTool {
 
     private record Result(int exit, String stdout, String stderr) {}
 
+    /**
+     * 把配置项归一成目录。
+     *
+     * <p>人很容易把 node.exe 的完整路径填进来,而不是目录 —— 那就取它的父目录,
+     * 不必为这点小事让人回去改配置。
+     */
+    static String nodeDirOf(String configured) {
+        if (configured == null || configured.isBlank()) return "";
+        try {
+            java.nio.file.Path p = java.nio.file.Path.of(configured.trim());
+            if (java.nio.file.Files.isRegularFile(p)) p = p.getParent();
+            return p == null ? "" : p.toAbsolutePath().toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** 把目录塞到子进程 PATH 最前面。Windows 的键名是 "Path",大小写不敏感但 Map 敏感。 */
+    static void prependPath(ProcessBuilder pb, String dir) {
+        if (dir == null || dir.isBlank()) return;
+        java.util.Map<String, String> env = pb.environment();
+        String key = null;
+        for (String k : env.keySet()) {
+            if ("path".equalsIgnoreCase(k)) { key = k; break; }
+        }
+        String use = key == null ? "PATH" : key;
+        String cur = env.get(use);
+        env.put(use, (cur == null || cur.isEmpty()) ? dir : dir + java.io.File.pathSeparator + cur);
+    }
+
     private Result run(List<String> cmd, int timeoutSeconds) {
         List<String> actual = new ArrayList<>(cmd);
         // Windows 上 npx 是 .cmd,ProcessBuilder 不能直接起,得借 cmd /c
@@ -403,6 +433,9 @@ public class ReaTool implements AiTool {
         ProcessBuilder pb = new ProcessBuilder(actual);
         pb.redirectErrorStream(false);
         pb.environment().put("NO_COLOR", "1");
+        // REA 靠 `node -v` 检测运行时,看的是子进程 PATH。不把指定 node 目录取前置,
+        // 它永远报系统那版 —— 而系统那版往往正是"版本不够"的那一版。
+        prependPath(pb, nodeDirOf(settings.rea().nodePath));
         Process proc = null;
         try {
             proc = pb.start();

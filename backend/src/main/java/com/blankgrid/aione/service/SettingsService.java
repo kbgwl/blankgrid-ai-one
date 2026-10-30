@@ -87,6 +87,15 @@ public class SettingsService {
         public String workdir = "";
         /** 单次分析最多跑多久 */
         public int timeoutSeconds = 240;
+        /**
+         * 指定给 REA 用的 node 目录(不是可执行文件路径)。
+         *
+         * <p>REA 要求 node ≥ 22.23.4,而机器上装的可能是更老的版本。
+         * 升级系统 node 会影响别的项目,所以这里只把目录前置到子进程的 PATH ——
+         * REA 检测的是 {@code node -v},不前置的话它永远看到系统那版。
+         * 空 = 用系统 PATH 里的 node。
+         */
+        public String nodePath = "";
 
         public boolean ready() {
             return enabled && notBlank(workdir);
@@ -289,6 +298,8 @@ public class SettingsService {
             if (in.command != null && !in.command.isBlank()) current.rea.command = in.command.trim();
             if (in.workdir != null) current.rea.workdir = in.workdir.trim();
             if (in.timeoutSeconds > 0) current.rea.timeoutSeconds = Math.min(1800, in.timeoutSeconds);
+            // 空串是"清空"(回到用系统 node),所以这里无条件覆盖 —— 和 workdir 一致
+            if (in.nodePath != null) current.rea.nodePath = in.nodePath.trim();
         }
         // 单价表与 PDF 字体:同样只在请求真带了的时候覆盖,免得老客户端把它清空
         if (incoming.pricing != null) current.pricing = incoming.pricing;

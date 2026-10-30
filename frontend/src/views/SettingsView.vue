@@ -271,13 +271,19 @@
                 <label class="pf"><span>启动命令</span>
                   <el-input v-model="form.rea.command" size="small" placeholder="npx -y rea-agents@latest" />
                 </label>
+                <label class="pf"><span>node 目录(可选)</span>
+                  <el-input v-model="form.rea.nodePath" size="small"
+                            placeholder="如 E:\reverse\node22\node-v22.23.4-win-x64" />
+                </label>
                 <label class="pf check"><span></span>
                   <el-button size="small" plain :loading="reaState.run" @click="testRea">自检工具链</el-button>
                 </label>
               </div>
               <p class="ds-now">
                 命令可以带参数,也可以填本机已装的 <code>rea</code> 路径。
-                首次用 <code>npx</code> 要下载包,会慢一点;分析原生二进制还需额外的 Ghidra 与 JDK。
+                REA 要求 node ≥ 22.23.4;系统那版更老时填上 node 目录即可,只对这个子进程生效,
+                不动系统 PATH(升系统 node 会影响别的项目)。
+                分析原生二进制还需 Ghidra(设 <code>GHIDRA_INSTALL_DIR</code>),apk 需 jadx-headless-mcp。
                 工作区不配置就不允许分析任何路径 —— 模型不该拿到一个绝对路径就能翻整台机器。
                 <b>改完先保存,自检读的是已保存的配置。</b>
                 <span v-if="reaState.detail" class="ds-detail" :class="reaState.ok ? 'ok' : 'err'">{{ reaState.detail }}</span>

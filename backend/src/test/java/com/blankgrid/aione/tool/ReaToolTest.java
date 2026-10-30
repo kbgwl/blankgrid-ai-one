@@ -72,6 +72,59 @@ class ReaToolTest {
     }
 
     @Test
+    @DisplayName("node 目录:填目录原样用,填成可执行文件路径就取父目录")
+    void nodeDirNormalization() {
+        assertEquals("", ReaTool.nodeDirOf(""));
+        assertEquals("", ReaTool.nodeDirOf(null));
+
+        Path dir = tempDir.resolve("node22");
+        assertEquals(dir.toAbsolutePath().toString(), ReaTool.nodeDirOf(dir.toString()));
+
+        // 人很容易把完整 exe 路径贴进来,不该为此让人回去改配置
+        Path exe = tempDir.resolve("node.exe");
+        try {
+            java.nio.file.Files.writeString(exe, "");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        assertEquals(tempDir.toAbsolutePath().toString(), ReaTool.nodeDirOf(exe.toString()));
+    }
+
+    @Test
+    @DisplayName("指定的 node 目录必须前置到子进程 PATH,否则 REA 看到的永远是系统那版")
+    void nodeDirGoesFirstInPath() {
+        ProcessBuilder pb = new ProcessBuilder("cmd");
+        String key = null;
+        for (String k : pb.environment().keySet()) {
+            if ("path".equalsIgnoreCase(k)) { key = k; break; }
+        }
+        if (key == null) key = "PATH";
+        pb.environment().put(key, "C:\\system\\bin");
+
+        ReaTool.prependPath(pb, "D:\\tools\\node");
+
+        String after = pb.environment().get(key);
+        assertTrue(after.startsWith("D:\\tools\\node"), after);
+        assertTrue(after.endsWith("C:\\system\\bin"), "系统原有的 PATH 不能丢:" + after);
+    }
+
+    @Test
+    @DisplayName("没配 node 目录时不动 PATH")
+    void emptyNodeDirLeavesPathAlone() {
+        ProcessBuilder pb = new ProcessBuilder("cmd");
+        String key = null;
+        for (String k : pb.environment().keySet()) {
+            if ("path".equalsIgnoreCase(k)) { key = k; break; }
+        }
+        if (key == null) key = "PATH";
+        pb.environment().put(key, "C:\\system\\bin");
+
+        ReaTool.prependPath(pb, "");
+
+        assertEquals("C:\\system\\bin", pb.environment().get(key));
+    }
+
+    @Test
     @DisplayName("工作区不存在时直接报错,不用等外部进程起来才发现")
     void refusesMissingWorkspace() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
