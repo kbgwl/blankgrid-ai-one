@@ -142,10 +142,12 @@
 
   --bg-ink: #e9e2d3;
   --bg-ink-2: #f3ecdd;
-  --text-dim: rgba(var(--rgb-ink), .7);
-  --text-faint: rgba(var(--rgb-ink), .46);
-  --border-hair: rgba(var(--rgb-ink), .13);
-  --border-hair-strong: rgba(var(--rgb-ink), .26);
+  --text-dim: rgba(var(--rgb-ink), .72);
+  --text-faint: rgba(var(--rgb-ink), .5);
+  /* 纸上的边界要比白卡明显一点 —— 底和面本来就挨得近,
+     再画一条 .13 的线等于没画。 */
+  --border-hair: rgba(var(--rgb-ink), .15);
+  --border-hair-strong: rgba(var(--rgb-ink), .3);
 
   --glow-cyan-soft: #93402b;
   --glow-cyan-dim: rgba(var(--rgb-glow), .74);
@@ -153,9 +155,15 @@
   --st-idle: rgba(var(--rgb-ink), .42);
   --st-off: rgba(var(--rgb-ink), .2);
 
-  --card-flat: rgba(255, 255, 255, .52);
-  --card-flat-hi: rgba(255, 255, 255, .76);
-  --field-bg: rgba(255, 255, 255, .66);
+  /* 原来卡片是 .52 的白 —— 叠在 #e9e2d3 上直接变纯白,整页看起来是
+     「米色背景上摆了几块白板」,纸只在缝里露一下。纸感的前提是
+     卡面仍然属于这张纸:白只加一点点,层次交给边线和投影。
+     而且半透明色会跟着背景走:160deg 的渐变在矮卡上几乎全是亮端、
+     在高卡的下半截走到暗端,同样是 .glass,一排小卡比一张大卡白一截。
+     纸本来就不透光 —— 这里改成实色,颜色一致,格线也不会从卡片底下穿出来。 */
+  --card-flat: rgba(255, 255, 255, .38);
+  --card-flat-hi: rgba(255, 255, 255, .58);
+  --field-bg: rgba(255, 255, 255, .6);
   --row-hover: rgba(var(--rgb-glow), .05);
   --chip-bg: rgba(var(--rgb-ink), .055);      /* 纸面上的标签是印出来的,不是提亮的 */
   --tint-soft: rgba(var(--rgb-ink), .03);
@@ -163,12 +171,14 @@
   --grid-line: rgba(var(--rgb-ink), .035);
   --warm-faint: rgba(var(--rgb-warm), .1);
   --brick: #a5462f;
-  --surface-grad: linear-gradient(160deg, rgba(var(--rgb-surface), .96), rgba(var(--rgb-surface-2), .9));
-  --shadow-card: 0 10px 28px rgba(var(--rgb-shadow), .13);
-  --shadow-soft: 0 8px 22px rgba(var(--rgb-shadow), .12);
-  --shadow-lift: 0 14px 30px rgba(var(--rgb-shadow), .16);
-  --shadow-hover: 0 16px 36px rgba(var(--rgb-shadow), .18);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, .85);
+  --surface-grad: #f2ecdf;
+  /* 纸叠纸的影子:贴边一道很浅的实影,再往外铺一层宽的。
+     扩散收到 -12/−16 的那版太紧,纸上看不见,卡片就糊进底里了。 */
+  --shadow-card: 0 1px 2px rgba(var(--rgb-shadow), .08), 0 9px 20px -7px rgba(var(--rgb-shadow), .26);
+  --shadow-soft: 0 1px 2px rgba(var(--rgb-shadow), .07), 0 7px 16px -7px rgba(var(--rgb-shadow), .22);
+  --shadow-lift: 0 2px 5px rgba(var(--rgb-shadow), .1), 0 16px 30px -10px rgba(var(--rgb-shadow), .3);
+  --shadow-hover: 0 3px 8px rgba(var(--rgb-shadow), .11), 0 20px 38px -12px rgba(var(--rgb-shadow), .32);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, .6);
   --code-bg: rgba(var(--rgb-ink), .045);
   --code-fg: rgba(var(--rgb-ink), .82);
   --on-error-hi: rgb(var(--rgb-on-error));
@@ -221,13 +231,44 @@ body {
     radial-gradient(1px 1px at 22% 56%, rgba(var(--rgb-ink), .10) 50%, transparent 51%);
 }
 
-/* 宣纸没有星尘,取而代之的是纸纤维:上方受光、下缘积墨 */
+/* 宣纸没有星尘,取而代之的是纸纤维:上方受光、下缘积墨。
+   受光原来是 .7 —— 顶部三分之一被漂成白色,连 sticky 的顶栏都成了白卡。
+   纸上的一束光是「亮一点」,不是「变白」。 */
 :root[data-theme="paper"] .ink-canvas {
   background:
-    radial-gradient(ellipse 60% 34% at 50% -8%, rgba(255, 252, 244, .7), transparent 66%),
+    radial-gradient(ellipse 68% 40% at 50% -10%, rgba(255, 252, 244, .3), transparent 72%),
     radial-gradient(ellipse 52% 40% at 92% 106%, rgba(var(--rgb-warm), .12), transparent 66%),
     var(--bg-ink);
 }
+
+/* 纸不是方格纸。这一层原本沿用墨夜的 48px 网格,纸上画满格子就成了
+   工程师的稿纸 —— 改成信笺那样的横线:一条 34px,靠下更淡。
+   品牌里的「格」在墨夜那一版就够了,宣纸这儿只需要纸。 */
+:root[data-theme="paper"] .ink-canvas::before {
+  background-image: repeating-linear-gradient(180deg,
+    rgba(var(--rgb-ink), .038) 0 1px, transparent 1px 32px);
+  background-size: auto;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 42%, black 22%, transparent 96%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 50% 42%, black 22%, transparent 96%);
+}
+
+/* 纸上的状态底纹要重新调一档。
+   所有 rgba(warn, .05~.08) 都是按深底写的 —— 琥珀色 .055 叠在 #e9e2d3 上
+   几乎等于没有,「缺料」于是退化成一张普通纸卡,而它本来是这一页最该被看见的东西。
+   纸上给它足够的暖,但不要把纸变成黄便签。 */
+:root[data-theme="paper"] .needs {
+  background: linear-gradient(165deg, rgba(var(--rgb-warn), .13), #f4efe1 62%);
+  border-color: rgba(var(--rgb-warn), .42);
+}
+:root[data-theme="paper"] .needs-list { border-top-color: rgba(var(--rgb-warn), .26); }
+:root[data-theme="paper"] .needs-list li { border-bottom-color: rgba(var(--rgb-warn), .18); }
+:root[data-theme="paper"] .budget {
+  background: linear-gradient(165deg, rgba(var(--rgb-error), .12), #f4efe1 62%);
+  border-color: rgba(var(--rgb-error), .42);
+}
+/* 看板「等你拍板」、目标卡的受阻提示同理:纸上要把边线画实 */
+:root[data-theme="paper"] .decide { border-color: rgba(var(--rgb-warn), .4); }
+:root[data-theme="paper"] .decide-item { border-color: rgba(var(--rgb-warn), .18); }
 
 /* ===== 玻璃面板 ===== */
 /* 16px 的模糊在深底上没有「透」可言,只是把背后的极光抹成一团灰。
@@ -597,6 +638,16 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
 }
 :root[data-theme="stitch"] .ink-canvas::before,
 :root[data-theme="stitch"] .ink-canvas::after { display: none; }
+
+/* 纸是平的,纸上的纸页也是平的:
+   - 不用渐变。渐变的亮端是多高、暗端在哪,全看卡片高度 —— 一排矮卡会比
+     一张高卡白一截,同一层级的卡片当场分成两色。
+   - 不叠受光。那道 120px 的「上亮下暗」在深底上是立体感,在纸上只是脏。
+   - 圆角收到 10px。16px 的胶囊感更像 App 卡片,纸页该是方的。 */
+:root[data-theme="paper"] .glass {
+  background: var(--surface-grad);
+  border-radius: 10px;
+}
 
 /* 卡片:不磨砂。毛玻璃在浅色底上叠出来的是一层灰雾,不是质感 */
 :root[data-theme="stitch"] .glass {
