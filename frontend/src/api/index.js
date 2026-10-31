@@ -144,6 +144,8 @@ export const api = {
   meetings: () => http.get('/meetings', { timeout: LIST_TIMEOUT }).then(r => r.data),
   meeting: (id) => http.get(`/meetings/${id}`, { timeout: LIST_TIMEOUT }).then(r => r.data),
   createMeeting: (body) => http.post('/meetings', body).then(r => r.data),
+  // 只传要改的字段;既然后端把 null 当"没动",弹窗就能只提交变动项
+  updateMeeting: (id, body) => http.patch(`/meetings/${id}`, body).then(r => r.data),
   deleteMeeting: (id) => http.delete(`/meetings/${id}`).then(r => r.data),
   startMeeting: (id) => http.post(`/meetings/${id}/start`).then(r => r.data),
   pauseMeeting: (id) => http.post(`/meetings/${id}/pause`).then(r => r.data),

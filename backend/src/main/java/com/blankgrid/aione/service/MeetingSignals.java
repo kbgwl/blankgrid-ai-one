@@ -223,11 +223,20 @@ public final class MeetingSignals {
         if (minutes >= 60 && decisions == 0) {
             out.add("开了 " + minutes + " 分钟,还没有任何一条可执行的决定");
         }
-        // 议程是开会前写的,会开完对一下不算刁难
-        if (!segs.isEmpty() && m.getAgenda() != null && !m.getAgenda().isBlank()) {
-            int items = (int) m.getAgenda().lines().filter(s -> !s.isBlank()).count();
-            if (items > 0 && minutes >= 30) {
-                out.add("议程 " + items + " 条 —— 收尾前留 5 分钟逐条对一下有没有聊到");
+        // 议程是开会前写的,会一开起来就没人再看了。
+        // 有用的话不是"记得逐条对一下"(谁都知道),而是"哪一条到现在还没人提"。
+        List<MeetingAgenda.Item> agenda = MeetingAgenda.check(m.getAgenda(), segs);
+        List<String> miss = MeetingAgenda.uncovered(agenda);
+        if (!segs.isEmpty() && !agenda.isEmpty() && !miss.isEmpty()) {
+            String list = miss.size() <= 2
+                    ? "「" + String.join("」「", miss) + "」"
+                    : "其中 " + miss.size() + " 条";
+            if (minutes >= 30) {
+                out.add("开了 " + minutes + " 分钟,议程还有 " + miss.size() + " 条没听到提到" + list
+                        + " —— 收尾前留几分钟过一遍,没提到的散会后基本就没人再提了");
+            } else {
+                out.add("议程还有 " + miss.size() + " 条没听到提到" + list
+                        + " —— 是还没轮到,还是这次打算跳过?");
             }
         }
         return out;

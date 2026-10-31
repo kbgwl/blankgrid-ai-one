@@ -49,6 +49,7 @@
         <div class="card-meta">
           <span>{{ minutes(x.elapsedSeconds) }}</span>
           <span>{{ x.segments }} 条发言</span>
+          <span v-if="x.agendaCount">议程 {{ x.agendaCount }} 条</span>
           <span v-if="x.itineraryCount">{{ x.itineraryCount }} 件行程</span>
           <span :class="['sum', summaryClass(x.summaryStatus)]">{{ summaryLabel(x.summaryStatus) }}</span>
           <span class="src">{{ sourceLabel(x.source) }}</span>

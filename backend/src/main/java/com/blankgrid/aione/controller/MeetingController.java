@@ -62,6 +62,13 @@ public class MeetingController {
         return meetings.detail(id);
     }
 
+    /** 会前改期、加人、改议题:只提交变动的字段 */
+    @PatchMapping("/{id}")
+    public Map<String, Object> update(@PathVariable Long id, @RequestBody MeetingService.UpdateBody body) {
+        meetings.update(id, body);
+        return meetings.detail(id);
+    }
+
     @DeleteMapping("/{id}")
     public Map<String, Object> delete(@PathVariable Long id) {
         meetings.delete(id);

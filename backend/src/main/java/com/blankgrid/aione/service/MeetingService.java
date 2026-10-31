@@ -108,6 +108,48 @@ public class MeetingService {
         return meetings.findById(id).orElseThrow(() -> new IllegalArgumentException("会议不存在: " + id));
     }
 
+    /** 只改传过来的字段:前端弹窗可以只提交变动的部分,null 一律当"没动" */
+    public static class UpdateBody {
+        public String title;
+        public String agenda;
+        public String location;
+        public String participants;
+        public String scheduledAt;
+        public String owner;
+    }
+
+    /**
+     * 改会议信息。
+     *
+     * <p>会前的会一定要能改:时间往后挪一小时、临时多来两个人、议题从三条变五条,
+     * 这些都是开会前的常态。原来只有"建"没有"改",改期只能删了重建 ——
+     * 已经录进去的片段、已经排好的行程会跟着一起没,而那才是真正贵的东西。
+     *
+     * <p>改议程不动纪要状态:纪要主体(List 出来的结论)不会因为议题改了就不成立,
+     * 但覆盖检查是实时算的,下一次读详情自动按新议程算。如果这里顺手把纪要标成
+     * "待更新",等于催人再花一次模型的钱去重写一份内容没变的纪要。
+     */
+    @Transactional
+    public Meeting update(Long id, UpdateBody b) {
+        Meeting m = get(id);
+        if (b == null) return m;
+        if (b.title != null) {
+            if (b.title.isBlank()) throw new IllegalArgumentException("会议标题不能为空");
+            m.setTitle(b.title.trim());
+        }
+        if (b.agenda != null) m.setAgenda(b.agenda.trim());
+        if (b.location != null) m.setLocation(b.location.trim());
+        if (b.participants != null) m.setParticipants(normalizeParticipants(b.participants));
+        if (b.owner != null) m.setOwner(b.owner.trim());
+        if (b.scheduledAt != null) {
+            String s = b.scheduledAt.trim();
+            m.setScheduledAt(s.isEmpty() ? null : parseInstant(s));
+        }
+        m = meetings.save(m);
+        pusher.push("meeting-state", Map.of("meetingId", m.getId(), "status", m.getStatus()));
+        return m;
+    }
+
     /**
      * 删掉一场会。说得清的是"误建的空会",所以连带片段与行程一起清 ——
      * 留着片段而会议没了,时间轴上的东西就成了没人认领的孤儿。
@@ -163,6 +205,11 @@ public class MeetingService {
     public Meeting end(Long id) {
         Meeting m = get(id);
         if (m.isEnded()) return m;
+        // 没开始过的会"结束"没有意义:时间轴是空的,只会留下一条 0 分钟的会
+        // 和一行"会议结束",列表里看着像开过。建错了应该删,不是结束。
+        if (Meeting.DRAFT.equals(m.getStatus())) {
+            throw new IllegalArgumentException("会议还没开始 —— 建错了直接删除,或者点「开始会议」");
+        }
         if (m.isLive() && m.getResumedAt() != null) {
             m.setActiveMs(m.getActiveMs() + Math.max(0, Instant.now().toEpochMilli() - m.getResumedAt().toEpochMilli()));
         }
@@ -340,6 +387,9 @@ public class MeetingService {
             row.put("summaryStatus", m.getSummaryStatus());
             row.put("summaryAt", m.getSummaryAt());
             row.put("itineraryCount", itinerary.findByMeetingIdOrderByStartAtAscIdAsc(m.getId()).size());
+            // 只数条数,不扫片段:列表页为每场会再全表扫一遍代价太大,
+            // "哪条聊到没"是进到会里才需要的信息
+            row.put("agendaCount", MeetingAgenda.split(m.getAgenda()).size());
             out.add(row);
         }
         return out;
@@ -377,6 +427,16 @@ public class MeetingService {
         out.put("speakerStats", MeetingSignals.speakerStats(segs));
         out.put("signals", MeetingSignals.collect(segs));
         out.put("insights", MeetingSignals.insights(m, segs, Instant.now()));
+        // 议程逐条是否聊到:界面上是"1 聊到了 / 2 还没人提",不是一句"记得对一下"
+        List<MeetingAgenda.Item> agendaItems = MeetingAgenda.check(m.getAgenda(), segs);
+        out.put("agendaItems", agendaItems.stream().map(it -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("index", it.index());
+            row.put("text", it.text());
+            row.put("covered", it.covered());
+            row.put("hit", it.hit());
+            return row;
+        }).toList());
         out.put("itinerary", items);
         return out;
     }
@@ -529,7 +589,19 @@ public class MeetingService {
         sb.append("- 有效时长:").append(MeetingTranscript.effectiveSeconds(m, segs) / 60).append(" 分钟\n");
         if (MeetingTranscript.notBlank(m.getAgenda())) {
             sb.append("- 会议前定的议题:\n").append(m.getAgenda()).append("\n");
-            sb.append("(对照议题看哪些聊到了、哪些没聊到,在「议题与结论」里点出来)\n");
+            // 把"哪条没聊到"当事实交给模型,而不是让它自己猜。
+            // 但要说清这是关键词比对:同义说法("华东渠道"说成"上海那边的分销")它认不出来,
+            // 所以请模型自己复核一遍,别把没聊的写成聊了。
+            List<MeetingAgenda.Item> items = MeetingAgenda.check(m.getAgenda(), segs);
+            List<String> miss = MeetingAgenda.uncovered(items);
+            if (!miss.isEmpty()) {
+                sb.append("- 逐条比对结果:其中「").append(String.join("」「", miss))
+                        .append("」在实录里没找到相关字眼。这是关键词比对,可能有同义说法没被认出来 —— ")
+                        .append("请自己再过一遍实录;确认确实没聊到的,在「议题与结论」末尾用一行写明「未讨论:…」,")
+                        .append("不要替它编一个结论。\n");
+            } else if (!items.isEmpty()) {
+                sb.append("- 逐条比对结果:").append(items.size()).append(" 条都在实录里找到了对应内容。\n");
+            }
         }
         return sb.toString();
     }

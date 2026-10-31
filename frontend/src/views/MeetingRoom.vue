@@ -32,6 +32,7 @@
           <template v-else>
             <button class="ghost" @click="genSummary(true)" :disabled="!!busy">重新生成纪要</button>
           </template>
+          <button class="ghost" @click="openEdit" :disabled="!!busy">编辑</button>
           <button class="ghost" @click="remove" :disabled="!!busy">删除</button>
         </div>
       </header>
@@ -101,6 +102,21 @@
             <div class="metric"><b>{{ m.segments.length }}</b><span>发言条数</span></div>
             <div class="metric"><b>{{ actionCount }}</b><span>待办/决议</span></div>
             <div class="metric"><b>{{ m.participants ? participantList.length : 0 }}</b><span>参会人</span></div>
+          </div>
+
+          <div v-if="agendaList.length" class="agenda">
+            <div class="agenda-head">
+              <h4>议程</h4>
+              <span class="count">{{ coveredCount }} / {{ agendaList.length }}</span>
+              <span class="spacer"></span>
+              <button class="ghost tiny" @click="openEdit">改</button>
+            </div>
+            <div v-for="it in agendaList" :key="it.index" class="ag-item" :class="{ done: it.covered }">
+              <span class="ag-mark">{{ it.covered ? '✓' : '○' }}</span>
+              <span class="ag-text">{{ it.text }}</span>
+              <span v-if="!it.covered && m.segments.length" class="ag-miss">没听到提到</span>
+            </div>
+            <p v-if="!m.segments.length" class="ag-hint">还没有开始记,聊到哪条这里会逐条打勾。</p>
           </div>
 
           <div v-if="m.insights && m.insights.length" class="tips">
@@ -316,6 +332,39 @@
         <el-button type="primary" :loading="!!busy" :disabled="!assignEmp" @click="doAssign">派给它</el-button>
       </template>
     </el-dialog>
+
+    <!-- 改会议信息 -->
+    <el-dialog v-model="editOpen" title="会议信息" width="560px" :close-on-click-modal="false">
+      <p class="dlg-hint">
+        会前的会一定要能改:改期、加人、议题临时多一条都很常见。改议程不影响已经生成的纪要,
+        只有"聊到哪条"会按新议程重算。
+      </p>
+      <div class="dlg-row">
+        <label>标题</label>
+        <input v-model="editForm.title" class="dlg-input" placeholder="会议标题" />
+      </div>
+      <div class="dlg-row">
+        <label>时间</label>
+        <input v-model="editForm.scheduledAt" class="dlg-input" type="datetime-local" />
+      </div>
+      <div class="dlg-row">
+        <label>地点</label>
+        <input v-model="editForm.location" class="dlg-input" placeholder="会议室 / 线上" />
+      </div>
+      <div class="dlg-row">
+        <label>参会人</label>
+        <input v-model="editForm.participants" class="dlg-input" placeholder="逗号分隔,说话人下拉会用它" />
+      </div>
+      <div class="dlg-row fill">
+        <label>议程</label>
+        <textarea v-model="editForm.agenda" rows="5" class="import-area"
+                  placeholder="一行一条,例如:&#10;1. 退货率为什么超红线&#10;2. 华东渠道怎么补"></textarea>
+      </div>
+      <template #footer>
+        <el-button @click="editOpen = false">取消</el-button>
+        <el-button type="primary" :loading="busy === 'edit'" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -440,6 +489,51 @@ function pct(s) {
   return Math.max(3, Math.round(s.chars * 100 / total))
 }
 
+const agendaList = computed(() => m.value?.agendaItems || [])
+const coveredCount = computed(() => agendaList.value.filter(i => i.covered).length)
+
+// ---------- 改会议信息 ----------
+const editOpen = ref(false)
+const editForm = ref({ title: '', agenda: '', location: '', participants: '', scheduledAt: '' })
+
+/** ISO → datetime-local 认识的本地时间;不转时区的话,弹窗里会显示成格林尼治时间 */
+function toLocalInput(iso) {
+  if (!iso) return ''
+  const dt = new Date(iso)
+  if (isNaN(dt.getTime())) return ''
+  const pad = n => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+}
+
+function openEdit() {
+  const d = m.value || {}
+  editForm.value = {
+    title: d.title || '',
+    agenda: d.agenda || '',
+    location: d.location || '',
+    participants: d.participants || '',
+    scheduledAt: toLocalInput(d.scheduledAt)
+  }
+  editOpen.value = true
+}
+
+async function saveEdit() {
+  if (!editForm.value.title.trim()) { ElMessage.warning('标题不能为空'); return }
+  busy.value = 'edit'
+  try {
+    // 秒数截掉:datetime-local 给到分钟就够了,后端也只认这个精度
+    const body = { ...editForm.value, scheduledAt: (editForm.value.scheduledAt || '').slice(0, 16) }
+    m.value = await api.updateMeeting(id, body)
+    elapsed.value = m.value.elapsedSeconds || 0
+    editOpen.value = false
+    ElMessage.success('已保存')
+  } catch (e) {
+    ElMessage.error(msg(e))
+  } finally {
+    busy.value = ''
+  }
+}
+
 async function load() {
   try {
     const d = await api.meeting(id)
@@ -516,10 +610,19 @@ async function end() {
   m.value.status = r.status
   elapsed.value = r.elapsedSeconds || 0
   await syncDetail()
-  if (m.value.segments.length) {
-    await genSummary(true)
-    tab.value = 'summary'
+  if (!m.value.segments.length) return
+  // "结束会议"这一步不该顺手花掉一次模型调用:创始人点结束时想的是"记完了",
+  // 不是"再等二十秒看模型能不能跑通"。要生成就问一句,不问就什么都不做。
+  try {
+    await ElMessageBox.confirm(
+      '会已经结束了。现在生成总结版吗?这会调用一次模型,也可以稍后自己点「生成总结版」。',
+      '生成纪要', { confirmButtonText: '现在生成', cancelButtonText: '稍后再说', type: 'info' })
+  } catch {
+    ElMessage.success('会已结束。纪要、原话、行程都在下面,随时可以生成')
+    return
   }
+  await genSummary(true)
+  tab.value = 'summary'
 }
 
 async function send() {
@@ -957,6 +1060,24 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .import-area { width: 100%; background: var(--field-bg); border: 1px solid var(--border-hair-strong); border-radius: 8px; color: var(--text-moon); font-size: 12.5px; line-height: 1.75; padding: 9px 11px; font-family: var(--font-mono); resize: vertical; }
 .dlg-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 11.5px; color: var(--text-faint); }
 .dlg-item { margin: 0 0 8px; font-size: 13px; color: var(--text-moon); }
+.dlg-input { flex: 1; min-width: 0; background: var(--field-bg); border: 1px solid var(--border-hair-strong); border-radius: 7px; color: var(--text-moon); font-size: 12.5px; padding: 6px 9px; font-family: inherit; }
+.dlg-input:focus { outline: none; border-color: var(--glow-cyan-dim); }
+.dlg-row.fill { align-items: flex-start; }
+.dlg-row.fill .import-area { flex: 1; }
+
+/* 议程:会开着的时候,该看的是"哪条还没人提" */
+.agenda { border: 1px solid var(--border-hair); border-radius: 8px; padding: 9px 10px; }
+.agenda-head { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+.agenda-head h4 { margin: 0; font-size: 11px; font-weight: 400; letter-spacing: .08em; color: var(--text-faint); }
+.agenda-head .count { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+.ag-item { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; line-height: 1.65; padding: 2px 0; color: var(--text-dim); }
+.ag-item.done { color: var(--text-faint); }
+.ag-mark { font-family: var(--font-mono); font-size: 10px; width: 10px; color: var(--text-faint); }
+.ag-item.done .ag-mark { color: var(--st-ok); }
+.ag-text { flex: 1; min-width: 0; }
+.ag-item.done .ag-text { text-decoration: line-through; text-decoration-color: var(--border-hair-strong); }
+.ag-miss { font-size: 9.5px; color: var(--warm); white-space: nowrap; }
+.ag-hint { margin: 6px 0 0; font-size: 10.5px; color: var(--text-faint); }
 
 @media (max-width: 1000px) {
   .page { padding: 16px 14px 60px; }
