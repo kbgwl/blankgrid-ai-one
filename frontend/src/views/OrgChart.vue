@@ -8,6 +8,44 @@
       <div class="h-vig"></div>
     </div>
 
+    <!-- 顶栏:左读数 · 右操作。原来这两块 absolute 浮在画布顶上,图一滚就从它们底下穿过去;
+         现在它们是舞台的第一段 —— 顺序必须是 顶栏 / 画布 / 底部带,它就是这里的第 0 段。 -->
+    <div class="stage-bar">
+      <!-- 左上 HUD 读数:公司规模 + 待拍板 + 实时时钟 -->
+      <div class="chart-status glass">
+        <span class="duty-dot" :class="{ 'is-stale': stale }"></span>
+        <span v-for="r in readouts" :key="r.label" class="hud-read" :title="r.hint">
+          <b>{{ r.value }}</b><i>{{ r.label }}</i>
+        </span>
+        <span v-if="escalations > 0" class="duty-badge" @click="goBoard" title="CEO 上报了等你拍板的事项">
+          <span class="badge-num">{{ escalations }}</span> 件待拍板
+        </span>
+        <span class="clock">{{ clock }}</span>
+      </div>
+
+      <!-- 右上操作 -->
+      <div class="chart-actions glass">
+        <span v-if="stale" class="stale-note" title="最近一次刷新没成功,看到的是上一次的组织架构">陈旧</span>
+        <el-button text class="quiet-btn" @click="deptOpen = true">＋ 部门</el-button>
+        <el-divider direction="vertical" />
+        <el-button text class="quiet-btn" @click="openAdd()">添一格</el-button>
+        <el-divider direction="vertical" />
+        <!-- 导出的是每个岗位真正收到的指令原文:判断这套编制合不合理,得横着比 -->
+        <el-dropdown trigger="click" @command="exportManual">
+          <el-button text class="quiet-btn">说明书</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="md">Markdown</el-dropdown-item>
+              <el-dropdown-item command="docx">Word</el-dropdown-item>
+              <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-divider direction="vertical" />
+        <el-button text class="quiet-btn" :loading="loading" @click="load">刷新</el-button>
+      </div>
+    </div>
+
     <div class="canvas-wrap" ref="wrap">
       <svg :width="size.w * viewScale" :height="size.h * viewScale"
            :viewBox="`0 0 ${size.w} ${size.h}`" class="chart-svg" :style="tiltStyle">
@@ -22,6 +60,14 @@
             <stop offset="0%" :stop-color="haloColor" stop-opacity=".5" />
             <stop offset="100%" :stop-color="haloColor" stop-opacity="0" />
           </radialGradient>
+          <!-- 泳道光:上端淡入、腰上最亮、到底散尽 —— 两端都不留硬边 -->
+          <linearGradient v-for="d in org.departments" :key="'lg-' + d.id" :id="'lane-' + d.id"
+                          x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" :stop-color="deptColor(d.colorKey)" stop-opacity="0" />
+            <stop offset="9%" :stop-color="deptColor(d.colorKey)" stop-opacity=".15" />
+            <stop offset="46%" :stop-color="deptColor(d.colorKey)" stop-opacity=".06" />
+            <stop offset="100%" :stop-color="deptColor(d.colorKey)" stop-opacity="0" />
+          </linearGradient>
         </defs>
 
         <!-- CEO 冠冕:只在上方展开的一段刻度弧。
@@ -66,6 +112,15 @@
              问题是它们各自悬在不同 x 上,而看负载的全部意义就是**横着比** ——
              五个不在同一基线上的数字,读一次要来回跳五次眼睛。
              搬到底部那条对齐的负载条里(见 hud-load),画布上就只剩结构。 -->
+
+        <!-- 泳道光:每列从部门卡向下淌一道自己颜色的极淡光。
+             五个部门的编制天生不齐(2 / 5 / 2 / 4 / 6),短的两列底下就空出三四百像素,
+             那不是留白,是"图上缺了一块"。铺一道光之后,空白成了这一列的领地。 -->
+        <g class="lanes" aria-hidden="true">
+          <rect v-for="l in lanes" :key="'ln-' + l.id"
+                :x="l.x - 122" :y="l.y1" :width="244" :height="l.y2 - l.y1"
+                :fill="`url(#lane-${l.id})`" />
+        </g>
 
         <g class="nodes">
           <!-- CEO Agent:AI 决策者,公司顶点 -->
@@ -175,43 +230,13 @@
       </div>
     </div>
 
-    <!-- 左上 HUD 读数:公司规模 + 待拍板 + 实时时钟 -->
-    <div class="chart-status glass">
-      <span class="duty-dot" :class="{ 'is-stale': stale }"></span>
-      <span v-for="r in readouts" :key="r.label" class="hud-read" :title="r.hint">
-        <b>{{ r.value }}</b><i>{{ r.label }}</i>
-      </span>
-      <span v-if="escalations > 0" class="duty-badge" @click="goBoard" title="CEO 上报了等你拍板的事项">
-        <span class="badge-num">{{ escalations }}</span> 件待拍板
-      </span>
-      <span class="clock">{{ clock }}</span>
-    </div>
-
-    <!-- 右上操作 -->
-    <div class="chart-actions glass">
-      <span v-if="stale" class="stale-note" title="最近一次刷新没成功,看到的是上一次的组织架构">陈旧</span>
-      <el-button text class="quiet-btn" @click="deptOpen = true">＋ 部门</el-button>
-      <el-divider direction="vertical" />
-      <el-button text class="quiet-btn" @click="openAdd()">添一格</el-button>
-      <el-divider direction="vertical" />
-      <!-- 导出的是每个岗位真正收到的指令原文:判断这套编制合不合理,得横着比 -->
-      <el-dropdown trigger="click" @command="exportManual">
-        <el-button text class="quiet-btn">说明书</el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="md">Markdown</el-dropdown-item>
-            <el-dropdown-item command="docx">Word</el-dropdown-item>
-            <el-dropdown-item command="pdf">PDF</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-      <el-divider direction="vertical" />
-      <el-button text class="quiet-btn" :loading="loading" @click="load">刷新</el-button>
-    </div>
+    <!-- 画布底沿:滚到底就没有,没滚到底才出现 ——
+         没有它,最后一行卡是被齐着切开的,读起来是"坏了";有了它,是"下面还有"。 -->
+    <div class="canvas-fade" :class="{ 'is-on': moreBelow }" aria-hidden="true"></div>
 
     <!-- 底部 HUD 带:实时事件流 · 部门负载 · 兵力仪表 -->
-    <footer class="hud-rail" ref="hudRail">
-      <section class="hud-feed glass">
+    <footer class="hud-rail glass" ref="rail">
+      <section class="hud-feed">
         <div class="hf-head">
           <span class="hf-title">实时事件流</span>
           <span class="hf-live" :class="{ quiet: !feedLines.length }"></span>
@@ -235,7 +260,7 @@
         </div>
       </section>
 
-      <section class="hud-load glass">
+      <section class="hud-load">
         <div class="hl-head">
           <span class="hl-title">部门负载</span>
           <div class="hud-legend">
@@ -260,7 +285,7 @@
         </div>
       </section>
 
-      <section class="hud-gauges glass">
+      <section class="hud-gauges">
         <div v-for="g in gauges" :key="g.label" class="gauge" :title="g.hint">
           <svg viewBox="0 0 60 60" class="g-arc" aria-hidden="true">
             <circle class="g-track" cx="30" cy="30" r="21" />
@@ -273,8 +298,9 @@
     </footer>
 
     <!-- 落款:竖排在右侧留白里,像画上的边款。原来它横在事件流和仪表之间,
-         七个字孤零零悬在七百像素的空当正中,读起来是"这里忘了放东西"。 -->
-    <div class="chart-slogan" aria-hidden="true"><span>一人,一格,一军</span></div>
+         七个字孤零零悬在七百像素的空当正中,读起来是"这里忘了放东西"。
+         现在图按宽度铺满,窄屏根本没有留白可放 —— 没有留白就不摆,别硬压在卡片上。 -->
+    <div class="chart-slogan" v-if="sloganRoom" aria-hidden="true"><span>一人,一格,一军</span></div>
 
     <EmployeePanel v-model="panelOpen" :employee="selected" @refresh="load" />
     <AddEmployeeDialog v-model="addOpen" :departments="org.departments" :presetDept="addPreset" @created="load" />
@@ -283,7 +309,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api, bus } from '../api'
 import { motionOk } from '../utils/motion'
@@ -308,7 +334,11 @@ const rippleIds = reactive(new Set())
 const spotIds = reactive(new Set())
 const viewScale = ref(1)
 const vPad = ref(0)
-const hudRail = ref(null)
+/* 图按宽度铺满之后,窄屏边上没有留白可放边款了 —— 这时它不该压到最后一列上 */
+const sloganRoom = ref(false)
+/* 画布下面还有没有内容:决定底沿那道渐隐亮不亮 */
+const moreBelow = ref(false)
+const rail = ref(null)
 const clock = ref('')
 let clockTimer = null
 
@@ -436,39 +466,58 @@ const crest = (() => {
   return { d: `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`, ticks }
 })()
 
-/* 自适应缩放:宽和高都参与取小,一屏看全公司;
-   高度富余(宽度先撞线,大屏常态)时把多余高度摊进行距 vPad,图纸才撑得满;
-   高度不够时守住 MIN_SCALE,宁可整页滚也不把字缩没。 */
-const MIN_SCALE = 0.6
+/* 自适应缩放:只按宽度缩,高度装不下就交给画布自己滚。
+   上一版是「一屏看全公司」当硬约束,宽高取小 —— 可 5 列 × 最深 6 人 = 1516 × 881,
+   任何窗口都装不下:1920 屏上被压到 0.772(正文 9.3px、数字 7.7px,左右各空 371px),
+   1400×664 上更是在 0.6 和 1.0 之间自己算自己(实测停在 1.0、图高 1399、横向溢出)。
+   缩了、糊了、还得滚 —— 三条全占。现在反过来:字不小于 0.8(正文 ≥9.6px),
+   空的宽度全给图,装不下的高度由画布滚。 */
+const MIN_SCALE = 0.8
+const MAX_SCALE = 1
 const MAX_PAD = 150
 const WRAP_PAD = 14
+/* 舞台底边到视口底之间留给 .main 的 padding-bottom */
 function fit() {
   const el = wrap.value
-  if (!el) return
+  const st = stage.value
+  if (!el || !st) return
+  /* 先把舞台钉成「视口减去舞台以上的部分」:顶栏 / 画布 / 底部带从此是同一块定高舞台的
+     三段,谁也不 absolute 浮在谁身上。
+     画布高度一旦是确定的,下面就能直接量它 —— 而不用从视口反推。 */
+  const top = st.getBoundingClientRect().top + window.scrollY
+  const pb = parseFloat(getComputedStyle(st.parentElement).paddingBottom) || 0
+  const vh = document.documentElement.clientHeight
+  st.style.height = Math.max(380, Math.round(vh - top - pb)) + 'px'
+  /* 底沿渐隐要贴在底部带的上沿 —— 带子多高由它自己决定,这里只把数值传下去 */
+  st.style.setProperty('--rail-h', (rail.value ? rail.value.offsetHeight : 0) + 'px')
+
+  /* 组织还没到就别算比例:这时 layout(0) 是「一个部门都没有」的 348×324,
+     按它算出来是 scale 1.0 + vPad 150(「还有富余,把行距摊开」),数据一到全图 1931 高。
+     宣纸主题上就是这么炸的:整页只剩一张拉长的图。 */
+  if (!(org.value.departments || []).length) return
+
   const base = layout(0)
   const availW = el.clientWidth - WRAP_PAD * 2
-  /* 可用高度不能问 el.clientHeight —— 画布现在是「由内容撑高」的,
-     问它就是拿上一轮的结果算这一轮。改成问视口:这一页从顶部到 HUD 之间还剩多少。
-     装不下时不再往死里缩(MIN_SCALE 以下字就没了),宁可让整页滚 —— 所以取
-     max(剩余高度, 图的「可读下限」),剩下交给页面滚动。 */
-  const stageTop = stage.value
-    ? stage.value.getBoundingClientRect().top + window.scrollY
-    : 0
-  const railH = hudRail.value ? hudRail.value.offsetHeight : 0
-  const room = window.innerHeight - stageTop - railH - WRAP_PAD * 2 - 18
-  const availH = Math.max(room, base.h * MIN_SCALE)
-  const scale = Math.max(MIN_SCALE, Math.min(1, availW / base.w, availH / base.h))
+  const availH = el.clientHeight - WRAP_PAD * 2
+  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, availW / base.w))
   viewScale.value = scale
-  /* h(pad) = h(0) + pad * (maxEmp + 1):部门行下沉、岗位首行、逐行间距各吃一份。
-     只有「宽度先撞线」时才真有多余高度可分 —— 那时 availH/scale > base.h。
-     高度先撞线时这里必然是 0,不能凭空撑高:撑高会写进下一轮的比例里,
-     结果是越算越小,整张图被自己的留白压掉一截。 */
-  const extra = availH / scale - base.h
-  const slack = extra > 0 ? extra / (base.maxEmp + 1) : 0
+  /* 高度真有富余(大屏、或者部门都很浅)才把行距摊开 —— 图挤在上面、底下空一片,
+     和当年「表格永远顶着上沿」是同一个毛病。 */
+  const extra = availH - base.h * scale
+  const slack = extra > 0 ? extra / (scale * (base.maxEmp + 1)) : 0
   vPad.value = Math.max(0, Math.min(MAX_PAD, Math.round(slack)))
+  sloganRoom.value = availW - base.w * scale > 150
   nextTick(() => {
-    if (el.scrollWidth > el.clientWidth) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
+    if (el.scrollWidth > el.clientWidth + 1) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
+    syncMore()
   })
+}
+
+/* 画布能不能再往下滚 —— 只有「还能」的时候才在底沿压一道渐隐 */
+function syncMore() {
+  const el = wrap.value
+  if (!el) return
+  moreBelow.value = el.scrollTop + el.clientHeight < el.scrollHeight - 4
 }
 
 /* 图纸几何:每一处纵向留白都跟着 vPad 走,连线/读同一份坐标,不会错位。
@@ -496,10 +545,19 @@ function layout(pad) {
   const lowest = maxEmp > 0
     ? firstEmpY + (maxEmp - 1) * rowPitch + EMP_H / 2
     : deptY + DEPT_H / 2
-  return { ceo: { x: w / 2, y: CEO_CY }, depts: deptNodes, emps: empNodes, w, h: lowest + BOTTOM_PAD, maxEmp }
+  /* 泳道光:从部门卡下沿一直淌到全图最低那张卡的位置。
+     终点对齐的是「最深的那一列」,所以五道光长短不一,收在同一个底 —— 板子才有下沿。 */
+  const laneList = depts.map(d => ({
+    id: d.id,
+    x: deptNodes[d.id].x,
+    y1: deptY + DEPT_H / 2 + 2,
+    y2: lowest + 14
+  }))
+  return { ceo: { x: w / 2, y: CEO_CY }, depts: deptNodes, emps: empNodes, lanes: laneList, w, h: lowest + BOTTOM_PAD, maxEmp }
 }
 
 const nodes = computed(() => layout(vPad.value))
+const lanes = computed(() => nodes.value.lanes)
 
 function deptColor(key) {
   return {
@@ -658,6 +716,11 @@ onMounted(() => {
   /* 画布现在是「由内容撑高」的:窗口变矮,它的高度不会跟着变,ResizeObserver
      就不会响。可 fit 算的是「视口里还剩多少」,所以必须直接听 resize。 */
   window.addEventListener('resize', fit)
+  wrap.value && wrap.value.addEventListener('scroll', syncMore, { passive: true })
+  /* 组织一到/一变就重算比例:数据是新的「图纸尺寸」,而比例是照图纸算的。
+     这条原来靠 load() 末尾的一帧 rAF 兜着,可首帧可能比数据早 —— 于是比例
+     留在按空组织算出来的 1.0 上,后面没人再喊一次。 */
+  watch(org, () => nextTick(fit))
   tick()
   clockTimer = setInterval(tick, 1000)
   off = bus.on(evt => {
@@ -700,6 +763,7 @@ onBeforeUnmount(() => {
   off && off()
   ro && ro.disconnect()
   window.removeEventListener('resize', fit)
+  wrap.value && wrap.value.removeEventListener('scroll', syncMore)
   clockTimer && clearInterval(clockTimer)
 })
 
@@ -771,17 +835,41 @@ function bumpStats(empId) {
 
 .org-chart {
   position: relative;
-  /* 高度由内容说了算,但至少撑满一屏。
-     原来写死 calc(100vh - 140px) + overflow:hidden:窗口一矮,画布被压到
-     一两百像素,而底部那条 HUD 又是 absolute 浮在图上 —— 于是最后两排岗位卡
-     直接被面板盖住,面板自己还被视口切掉半截。 */
-  min-height: calc(100vh - 140px);
+  /* 舞台高度由 fit() 写死成「视口减顶栏」,内部三段各自定位:
+     顶栏(flex:none) / 画布(flex:1,自己滚) / 底部带(flex:none)。
+     原来是 min-height + 内容撑高 + HUD absolute 浮在图上 —— 内容一超过视口,
+     浮动那块就压住最后两排卡,而 fit() 还在拿视口反推比例,越算越乱。 */
   display: flex; flex-direction: column;
+  min-height: 380px;
+  overflow: hidden;
 }
-/* 画布只负责横向兜底(窄屏放不下时左右挪),纵向让它自然长高 ——
-   高度不够的时候是整页往下滚,而不是在画布里再滚一层。 */
-.canvas-wrap { flex: 1 0 auto; min-height: 0; overflow-x: auto; overflow-y: hidden; padding: 14px; position: relative; z-index: 1; }
+/* 顶栏也是一段,不是浮在画布上的两块玻璃 */
+.stage-bar {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 6px 14px 0;
+}
+/* 画布:唯一允许滚动的容器。scrollbar-gutter 常驻留出滚动条的位置 ——
+   否则「有没有竖滚动条」会让 clientWidth 跳 8px,比例跟着跳,图来回抽一下。
+   min-width:0 是这套算法的命门:flex 项的自动最小宽度贴着内容走,
+   图一旦按 1.0 铺出来,画布就撑到图的宽度,于是「可用宽度」= 图的宽度 = 比例 1.0,
+   自洽了,也就再也缩不下去 —— 上一版 1400×664 停在 1.0、横向溢出 156px 就是这么来的。 */
+.canvas-wrap {
+  flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px;
+  position: relative; z-index: 1;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
 .chart-svg { display: block; margin: 0 auto; }
+
+/* 画布底沿的渐隐:只在「下面还有内容」时出现,用 --rail-h 贴在底部带上沿 */
+.canvas-fade {
+  position: absolute; left: 0; right: 0; z-index: 2;
+  bottom: calc(var(--rail-h, 122px) + 10px);
+  height: 42px; pointer-events: none; opacity: 0;
+  transition: opacity .3s var(--ease-quiet);
+  background: linear-gradient(180deg, transparent, var(--bg-ink) 94%);
+}
+.canvas-fade.is-on { opacity: 1; }
 
 /* ===== 全息底:透视网格地平线 / 星尘 / 慢扫光 / 暗角(铺满整块舞台)
    四层全部乘 --org-fx。它默认是 1(墨夜),宣纸与素白是 0 —— 原来这几层
@@ -831,6 +919,10 @@ function bumpStats(empId) {
   inset: 0;
   background: radial-gradient(122% 104% at 50% 44%, transparent 42%, rgba(var(--rgb-shadow), calc(.5 * var(--org-fx))) 100%);
 }
+
+/* ===== 泳道光:短列底下那几百像素不再是「图上缺一块」 ===== */
+/* 墨夜给满,纸与素白上收薄一档 —— 纸上淌一道淡彩会脏,但不能没有,否则空白又回来了 */
+.lanes { opacity: calc(.45 + .55 * var(--org-fx)); }
 
 /* ===== CEO 冠冕:一段刻度弧 + 缓慢巡行的高光 ===== */
 .ceo-core { pointer-events: none; }
@@ -914,25 +1006,26 @@ function bumpStats(empId) {
 @keyframes ldSpin { to { transform: rotate(360deg); } }
 .ld-text { font-size: 11.5px; letter-spacing: .28em; color: var(--text-dim); }
 
-/* HUD 面板统一切角:作战台的四块板子用同一个倒角 */
-.chart-status, .chart-actions, .hud-feed, .hud-gauges {
+/* HUD 面板统一切角:作战台的板子用同一个倒角 */
+.chart-status, .chart-actions, .hud-rail {
   --cham: 10px; border-radius: 0;
   clip-path: polygon(var(--cham) 0, 100% 0, 100% calc(100% - var(--cham)),
                      calc(100% - var(--cham)) 100%, 0 100%, 0 var(--cham));
 }
 
+/* 顶栏两块板:在流内,左右各贴一边,和图/底部带的左右边对齐(都是 14px) */
+.chart-status {
+  padding: 7px 16px;
+  display: flex; align-items: center; gap: 14px;
+}
 .chart-actions {
-  position: absolute; top: 6px; right: 6px; z-index: 3; padding: 4px 10px 4px 8px;
+  padding: 4px 10px 4px 8px;
   display: flex; align-items: center; gap: 2px;
 }
 .quiet-btn { color: var(--text-dim); letter-spacing: .15em; }
 .quiet-btn:hover { color: var(--glow-cyan); }
 .chart-actions :deep(.el-divider--vertical) { border-color: var(--border-hair); height: 14px; }
 
-.chart-status {
-  position: absolute; top: 6px; left: 6px; z-index: 3; padding: 7px 16px;
-  display: flex; align-items: center; gap: 14px;
-}
 .duty-dot {
   width: 7px; height: 7px; border-radius: 50%; background: var(--glow-cyan);
   box-shadow: 0 0 8px rgba(var(--rgb-glow), .8); flex: none;
@@ -942,19 +1035,17 @@ function bumpStats(empId) {
 .hud-read i { font-style: normal; font-size: 9.5px; letter-spacing: .2em; color: var(--text-faint); }
 .clock { font-family: var(--font-mono); font-size: 13px; color: var(--glow-cyan); letter-spacing: .1em; }
 
-/* ===== 底部 HUD 带:事件流(弹性) · 部门负载(固定) · 兵力仪表 ===== */
-/* 它是图纸下方的一条带,不是盖在图纸上的一块板。
-   原来用 absolute bottom:10px 浮在画布之上,窗口一矮就压住最后一排岗位卡,
-   还因为超出视口被切掉半截 —— 用户看到的「下面都挡住了」就是这个。 */
+/* ===== 底部 HUD 带:一整条,内部三段用发丝线隔开 =====
+   原来它是三块各自带玻璃底的小板并排,最右边那块仪表悬在 384px 负载条之后,
+   中间一段空当,读起来像"漂出去的一张卡"。合成一条之后,左中右是一个东西。 */
 .hud-rail {
-  position: relative; z-index: 3; flex: none;
+  flex: none; position: relative; z-index: 3;
   margin: 0 14px 10px;
-  display: flex; align-items: flex-end; gap: 14px;
-  pointer-events: none;
+  display: flex; align-items: stretch;
 }
 /* 事件流拿走剩下的全部宽度。它原来是写死的 340px —— 那句话放不下,
    于是每一条都以「…」收尾,五条读下来一条也没读完。宽度给够,字就不用砍。 */
-.hud-feed { flex: 1 1 auto; min-width: 260px; padding: 8px 14px 6px; pointer-events: auto; }
+.hud-feed { flex: 1 1 auto; min-width: 240px; padding: 8px 16px 7px; }
 .hf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
 .hf-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); }
 .hf-live {
@@ -1005,7 +1096,7 @@ function bumpStats(empId) {
 .hf-none { position: absolute; inset: 0; margin: 0; padding-top: 6px; font-size: 10.5px; letter-spacing: .1em; color: var(--text-faint); }
 
 /* ===== 部门负载:五个部门站在同一条基线上,才能横着比 ===== */
-.hud-load { flex: 0 0 384px; padding: 7px 14px 8px; pointer-events: auto; }
+.hud-load { flex: 0 0 384px; padding: 8px 16px 9px; border-left: 1px solid var(--border-hair); }
 .hl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .hl-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); white-space: nowrap; }
 .hud-legend { display: flex; align-items: center; gap: 10px; }
@@ -1055,7 +1146,10 @@ function bumpStats(empId) {
   font-size: 11px; letter-spacing: .46em; color: var(--text-faint);
 }
 
-.hud-gauges { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 7px 14px; pointer-events: auto; }
+.hud-gauges {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
+  padding: 8px 18px 9px; border-left: 1px solid var(--border-hair);
+}
 .gauge { position: relative; width: 58px; height: 58px; }
 .g-arc { width: 58px; height: 58px; transform: rotate(-90deg); display: block; }
 .g-track { fill: none; stroke: var(--border-hair-strong); stroke-width: 5; }
