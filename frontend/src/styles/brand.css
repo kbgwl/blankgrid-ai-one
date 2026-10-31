@@ -92,6 +92,9 @@
   --stardust: 1;                  /* 星尘层:宣纸下收掉 */
   --meteor-a: .8;
   --fx-a: 1;                      /* 极光/流星特效层的存在感 */
+  --org-fx: 1;                    /* 组织页那座「全息台」:透视地网 + 扫描 + 暗角。
+                                     它只属于墨夜 —— 纸上画朱砂透视网格、浅底上压一层暗角,
+                                     都是把别的界面的特效搬错了地方。 */
   --on-error: rgb(var(--rgb-on-error));
   --on-error-hi: rgb(255, 217, 217);
   --btn-solid: rgb(var(--rgb-btn));
@@ -185,6 +188,7 @@
   --stardust: 0;
   --meteor-a: .34;
   --fx-a: .55;
+  --org-fx: 0;                    /* 纸上有纤维、有横线,不需要再叠一层地网与暗角 */
   --btn-solid: rgb(var(--rgb-btn));
   --btn-solid-hover: rgb(var(--rgb-btn-hi));
   --btn-solid-border: rgb(var(--rgb-btn));
@@ -628,6 +632,7 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
   --stardust: 0;
   --meteor-a: 0;
   --fx-a: 0;
+  --org-fx: 0;
 }
 
 /* 画布只剩一层极淡的中心提亮 —— 浅底上再加极光会变成廉价渐变 */
@@ -659,6 +664,25 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
 /* 胶囊里的小标签跟着圆角走 */
 :root[data-theme="stitch"] .el-button,
 :root[data-theme="stitch"] .el-button--primary { border-radius: 999px; }
+
+/* 组织架构里的节点卡在墨夜是「切角 + 内斜面」—— 那套语言靠 clip-path 实现,
+   而 clip-path 会把外投影一起剪掉,深底上本来也看不见影子,所以成立。
+   到了纸和素白上,卡片必须靠影子才立得起来,切角就成了「既没有影子、
+   角还是缺的」。这两套主题换回圆角 + 真投影,各自的语言才自洽。 */
+:root[data-theme="paper"] .node-card.dept,
+:root[data-theme="paper"] .node-card.emp,
+:root[data-theme="paper"] .node-card.blank-cell {
+  clip-path: none;
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+}
+:root[data-theme="stitch"] .node-card.dept,
+:root[data-theme="stitch"] .node-card.emp,
+:root[data-theme="stitch"] .node-card.blank-cell {
+  clip-path: none;
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+}
 /* 输入框:白底白卡叠在一起会"消失"。M3 的 outlined 字段靠一圈灰边定位,不靠底色 */
 :root[data-theme="stitch"] .el-input__wrapper,
 :root[data-theme="stitch"] .el-textarea__inner,

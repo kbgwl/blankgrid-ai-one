@@ -19,23 +19,23 @@
             </feMerge>
           </filter>
           <radialGradient id="coreHalo">
-            <stop offset="0%" :stop-color="haloColor" stop-opacity=".62" />
+            <stop offset="0%" :stop-color="haloColor" stop-opacity=".5" />
             <stop offset="100%" :stop-color="haloColor" stop-opacity="0" />
           </radialGradient>
         </defs>
 
-        <!-- CEO 核心:搏动光环 + 两圈反向旋转刻度环(纯装饰,压在卡片下层) -->
+        <!-- CEO 冠冕:只在上方展开的一段刻度弧。
+             原来是两圈整圆环 —— 半径 145 的下沿正好从部门卡和浮空芯片中间穿过,
+             虚线加刻度在深底上碎成一片噪点,还和芯片打架。
+             改成半圈:它替 CEO 画出「顶点」这一层,但永远不往下侵占部门的地盘。 -->
         <g class="ceo-core" :transform="`translate(${nodes.ceo.x}, ${nodes.ceo.y})`" aria-hidden="true">
-          <circle class="core-halo" cx="0" cy="0" r="88" fill="url(#coreHalo)" />
-          <g class="spin-rev">
-            <circle r="145" fill="none" :stroke="haloColor" stroke-opacity=".3" stroke-width="1.2" stroke-dasharray="34 12 6 12" />
-          </g>
-          <g class="spin-slow" filter="url(#softGlow)">
-            <circle r="118" fill="none" :stroke="haloColor" stroke-opacity=".48" stroke-width="1.3" stroke-dasharray="3 9" />
-            <line v-for="t in ticks" :key="'tk' + t.k" class="tick"
-                  :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2" :stroke-width="t.major ? 1.7 : 1"
-                  :stroke="haloColor" :stroke-opacity="t.major ? .85 : .4" />
-          </g>
+          <ellipse class="core-halo" cx="0" cy="-26" rx="212" ry="132" fill="url(#coreHalo)" />
+          <path class="crest-arc" :d="crest.d" fill="none" :stroke="haloColor" />
+          <path class="crest-sweep" v-if="!calm" :d="crest.d" fill="none" :stroke="haloColor" />
+          <line v-for="t in crest.ticks" :key="'tk' + t.k" class="crest-tick"
+                :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2"
+                :stroke-width="t.major ? 1.3 : 1"
+                :stroke="haloColor" :stroke-opacity="t.major ? .5 : .26" />
         </g>
 
         <!-- 链路常驻:宽描边当辉光底,细描边当骨架;两者都跟着部门色 -->
@@ -62,15 +62,10 @@
           </g>
         </g>
 
-        <!-- 流转标注芯片:CEO → 各部门之间 -->
-        <g v-for="c in edgeChips" :key="'chip-' + c.deptId">
-          <foreignObject :x="c.x - CHIP_W/2" :y="c.y - CHIP_H/2" :width="CHIP_W" :height="CHIP_H">
-            <div class="edge-chip glass" :style="{ '--dept-color': c.color }">
-              <span class="chip-down">↓ {{ c.pending }} 待处理</span>
-              <span class="chip-up">↑ {{ c.doneToday }} 今日完成</span>
-            </div>
-          </foreignObject>
-        </g>
+        <!-- 部门负载原来画成五枚浮在 CEO→部门连线上的小芯片。
+             问题是它们各自悬在不同 x 上,而看负载的全部意义就是**横着比** ——
+             五个不在同一基线上的数字,读一次要来回跳五次眼睛。
+             搬到底部那条对齐的负载条里(见 hud-load),画布上就只剩结构。 -->
 
         <g class="nodes">
           <!-- CEO Agent:AI 决策者,公司顶点 -->
@@ -116,20 +111,23 @@
                     <span class="status-dot" :class="dotClass(e)"></span>
                   </div>
                   <div class="node-title">{{ e.currentTaskSummary || e.title }}</div>
+                  <!-- 原来这里是「本周 · 今日 · 累计 · 上次 · 待」五段流水,按 0.78 的
+                       适配比例落到屏幕上只有 8px,读起来是一串点。
+                       而且主位放的是 metricLabel —— 只有五个负责人填了这个字段,
+                       其余十四个人的卡片上是「本周交付」后面跟着一片空白,
+                       同一排卡片一半有数字一半没有,像坏了一半。
+                       现在统一成:今日(唯一的主数,人人都有) | 累计或自定义指标 | 待。 -->
                   <div class="emp-stats" v-if="stats[e.id]">
-                    <span v-if="stats[e.id].metricLabel" class="st-metric">
-                      <span class="st-metric-num">{{ stats[e.id].metricValue }}</span> {{ stats[e.id].metricLabel }}
+                    <span class="st-hero">
+                      <b>{{ stats[e.id].doneToday }}</b><i>今日</i>
                     </span>
-                    <i v-if="stats[e.id].metricLabel" class="st-sep"></i>
-                    <span class="st-num">{{ stats[e.id].doneToday }}</span> 今日
-                    <i class="st-sep"></i>
-                    <span class="st-num">{{ stats[e.id].doneTotal }}</span> 累计
-                    <template v-if="stats[e.id].lastDoneAt">
-                      <i class="st-sep"></i> 上次 {{ hhmm(stats[e.id].lastDoneAt) }}
-                    </template>
-                    <template v-if="stats[e.id].pending > 0">
-                      <i class="st-sep"></i><span class="st-pending">待 {{ stats[e.id].pending }}</span>
-                    </template>
+                    <i class="st-split"></i>
+                    <span class="st-pair">
+                      <b>{{ stats[e.id].metricValue != null ? stats[e.id].metricValue : stats[e.id].doneTotal }}</b>{{ stats[e.id].metricLabel || '累计' }}
+                    </span>
+                    <span v-if="stats[e.id].pending > 0" class="st-pair is-pending">
+                      <b>{{ stats[e.id].pending }}</b>待
+                    </span>
                   </div>
                 </div>
                 <div v-if="e.status === 'RUNNING'" class="emp-prog"><i></i></div>
@@ -162,6 +160,19 @@
     <div v-else-if="loading && !org.departments.length" class="org-loading glass">
       <span class="ld-ring"></span>
       <span class="ld-text">组织架构载入中</span>
+    </div>
+
+    <!-- 一个部门都没有:图纸上什么都不摆,人会以为这页坏了,而不是"还没开始" -->
+    <div v-else-if="!org.departments.length" class="org-empty">
+      <div class="empty-card glass">
+        <div class="empty-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="empty-title">还没有部门</p>
+        <p class="empty-text">
+          组织是这家公司的骨架。先立一个部门,再往里放岗位 ——<br />
+          每个岗位写清一句职责,它就能自己接活、自己交活。
+        </p>
+        <el-button @click="deptOpen = true">建第一个部门</el-button>
+      </div>
     </div>
 
     <!-- 左上 HUD 读数:公司规模 + 待拍板 + 实时时钟 -->
@@ -198,33 +209,54 @@
       <el-button text class="quiet-btn" :loading="loading" @click="load">刷新</el-button>
     </div>
 
-    <!-- 底部 HUD 带:实时事件流 · 状态图例与落款 · 兵力仪表 -->
+    <!-- 底部 HUD 带:实时事件流 · 部门负载 · 兵力仪表 -->
     <footer class="hud-rail" ref="hudRail">
       <section class="hud-feed glass">
         <div class="hf-head">
           <span class="hf-title">实时事件流</span>
           <span class="hf-live" :class="{ quiet: !feedLines.length }"></span>
-          <span class="hf-hint">{{ feedLines.length ? 'WebSocket 一到就补进队首' : '等待第一条施工事件' }}</span>
+          <span class="hf-hint">{{ feedLines.length ? '事件一到就入队' : '等待第一条施工事件' }}</span>
         </div>
-        <transition-group tag="div" name="mv" class="hf-list">
-          <div v-for="l in feedLines" :key="l.key" class="hf-line" :class="'tone-' + l.tone">
-            <span class="hf-tag">{{ l.tag }}</span>
-            <span class="hf-text">{{ l.text }}</span>
-            <span class="hf-time">{{ l.time }}</span>
-          </div>
-        </transition-group>
-        <p v-if="!feedLines.length" class="hf-none">公司在等一个目标:派活或 CEO 巡视后,这里会逐条打字机补上。</p>
+        <!-- 空态提示放在固定高度的列表里,而不是另起一行。
+             它另起一行的话,底部带会高 21px;而 fit() 是先量这条带再定缩放的,
+             于是"有没有第一条事件"会悄悄改变整张图的比例 —— 事件一到,全图重排一次。 -->
+        <div class="hf-list">
+          <transition-group tag="div" name="mv">
+            <div v-for="(l, i) in feedLines" :key="l.key" class="hf-line"
+                 :class="['tone-' + l.tone, { 'is-head': i === 0 }]">
+              <!-- 连着五条都是 CEO 的周报时,标签列会变成一堵「CEO CEO CEO」。
+                   重复的那个词不提供任何信息,只占宽度 —— 隐掉但留位,列不会跳。 -->
+              <span class="hf-tag" :class="{ 'is-dup': i > 0 && l.tag === feedLines[i - 1].tag }">{{ l.tag }}</span>
+              <span class="hf-text">{{ l.text }}</span>
+              <span class="hf-time">{{ l.time }}</span>
+            </div>
+          </transition-group>
+          <p v-if="!feedLines.length" class="hf-none">公司在等一个目标:派活或 CEO 巡视后,这里会逐条补上。</p>
+        </div>
       </section>
 
-      <section class="hud-mid">
-        <div class="hud-legend">
-          <span class="lg"><i class="lg-dot lg-idle"></i>待机</span>
-          <span class="lg"><i class="lg-dot lg-run"></i>执行中</span>
-          <span class="lg"><i class="lg-dot lg-err"></i>异常</span>
-          <span class="lg"><i class="lg-dot lg-off"></i>停用</span>
+      <section class="hud-load glass">
+        <div class="hl-head">
+          <span class="hl-title">部门负载</span>
+          <div class="hud-legend">
+            <span class="lg"><i class="lg-dot lg-idle"></i>待机</span>
+            <span class="lg"><i class="lg-dot lg-run"></i>执行中</span>
+            <span class="lg"><i class="lg-dot lg-err"></i>异常</span>
+            <span class="lg"><i class="lg-dot lg-off"></i>停用</span>
+          </div>
         </div>
-        <div class="chart-slogan">
-          <span class="slogan-text">一人,一格,一军</span>
+        <div class="hl-bars">
+          <div v-for="d in loadBars" :key="d.id" class="hl-bar" :title="d.hint">
+            <span class="hl-track">
+              <i class="hl-fill is-done" :style="{ height: d.donePx + 'px', background: d.color }"></i>
+              <i v-if="d.pending > 0" class="hl-fill is-pend" :style="{ height: d.pendPx + 'px' }"></i>
+              <!-- 数字贴着柱顶走,而不是钉在固定高度:否则 4 和 28 的数都浮在同一行,
+                   跟下面那根柱子失去联系,读起来是一个表格而不是一张条形图。 -->
+              <b class="hl-num" :style="{ bottom: (d.donePx + d.pendPx + 4) + 'px' }">{{ d.done }}<i
+                v-if="d.pending > 0" class="hl-pend-num">+{{ d.pending }}</i></b>
+            </span>
+            <span class="hl-name" :style="{ '--dept-color': d.color }">{{ d.short }}</span>
+          </div>
         </div>
       </section>
 
@@ -239,6 +271,10 @@
         </div>
       </section>
     </footer>
+
+    <!-- 落款:竖排在右侧留白里,像画上的边款。原来它横在事件流和仪表之间,
+         七个字孤零零悬在七百像素的空当正中,读起来是"这里忘了放东西"。 -->
+    <div class="chart-slogan" aria-hidden="true"><span>一人,一格,一军</span></div>
 
     <EmployeePanel v-model="panelOpen" :employee="selected" @refresh="load" />
     <AddEmployeeDialog v-model="addOpen" :departments="org.departments" :presetDept="addPreset" @created="load" />
@@ -256,10 +292,10 @@ import EmployeePanel from '../components/EmployeePanel.vue'
 import AddEmployeeDialog from '../components/AddEmployeeDialog.vue'
 import DepartmentDialog from '../components/DepartmentDialog.vue'
 
-const EMP_W = 218, EMP_H = 80, CEO_W = 250, CEO_H = 92, DEPT_W = 172, DEPT_H = 60
+const EMP_W = 236, EMP_H = 78, CEO_W = 250, CEO_H = 92, DEPT_W = 172, DEPT_H = 60
 const calm = !motionOk()
-/* CEO_CY 给刻度环留出上方空间(环顶要落在 viewBox 内);LINK_TOP 必须落在 CEO 卡片下缘之外 */
-const DEPT_GAP = 64, CHIP_W = 176, CHIP_H = 30, CEO_CY = 150, LINK_TOP = 202
+/* CEO_CY 给冠冕弧留出上方空间(弧顶要落在 viewBox 内);LINK_TOP 必须落在 CEO 卡片下缘之外 */
+const DEPT_GAP = 56, CEO_CY = 142, LINK_TOP = 190
 
 const wrap = ref(null)
 const org = ref({ ceo: null, departments: [], stats: {} })
@@ -345,7 +381,9 @@ const toneMap = { GOAL: 'glow', FEEDBACK: 'warn', REPORT: 'plan', ESCALATION: 'e
 const feedLines = ref([])
 let feedSeq = 0
 function pushFeed(type, text) {
-  const body = String(text || '').slice(0, 46)
+  // 原来这里 .slice(0, 46) 硬切:一条 60 字的周报会先被砍成半句,再被 CSS 省略号
+  // 砍第二次,屏幕上永远只剩 20 个字加一个「…」。不切,交给宽度自己决定显示多少。
+  const body = String(text || '').trim()
   const head = feedLines.value[0]
   if (!body || (head && head.text === body)) return
   feedLines.value.unshift({
@@ -355,7 +393,7 @@ function pushFeed(type, text) {
     text: body,
     time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
   })
-  if (feedLines.value.length > 5) feedLines.value.length = 5
+  if (feedLines.value.length > 4) feedLines.value.length = 4
 }
 
 /* 视差倾斜:整块图纸跟着指针微微侧转,让全息有纵深(关掉动效偏好时不接管) */
@@ -376,19 +414,27 @@ const tiltStyle = computed(() => ({
 function resetTilt() { tilt.x = 0; tilt.y = 0 }
 
 const haloColor = 'var(--glow-cyan)'
-const ticks = (() => {
-  const out = []
-  for (let k = 0; k < 24; k++) {
-    const a = (k * 15 - 90) * Math.PI / 180
-    const major = k % 6 === 0
-    const r1 = 124, r2 = major ? 140 : 132
-    out.push({
-      k, major,
-      x1: +(Math.cos(a) * r1).toFixed(2), y1: +(Math.sin(a) * r1).toFixed(2),
-      x2: +(Math.cos(a) * r2).toFixed(2), y2: +(Math.sin(a) * r2).toFixed(2)
-    })
+/* 冠冕弧:以卡片中心为原点、圆心在下方的一段圆弧(R=170),从卡片左上斜上方
+   越过头顶落到右上。端点刻意收在 ±130(卡片半宽 125)之外一点,
+   这样圆弧永远不会压到卡片,也不会像整圆环那样垂到部门行里去。 */
+const crest = (() => {
+  const R = 170, CY = 46.4
+  const a0 = 220.1 * Math.PI / 180
+  const a1 = 319.9 * Math.PI / 180
+  const pt = (a, r) => ({
+    x: +(Math.cos(a) * r).toFixed(2),
+    y: +(CY + Math.sin(a) * r).toFixed(2)
+  })
+  const s = pt(a0, R), e = pt(a1, R)
+  const ticks = []
+  const N = 21
+  for (let k = 0; k < N; k++) {
+    const a = a0 + (a1 - a0) * k / (N - 1)
+    const major = k % 5 === 0
+    const p1 = pt(a, R), p2 = pt(a, R - (major ? 13 : 7))
+    ticks.push({ k, major, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y })
   }
-  return out
+  return { d: `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`, ticks }
 })()
 
 /* 自适应缩放:宽和高都参与取小,一屏看全公司;触到可读下限才允许横向平移
@@ -408,16 +454,22 @@ function fit() {
   const availH = Math.max(160, el.clientHeight - WRAP_PAD - band)
   const scale = Math.max(MIN_SCALE, Math.min(1, availW / base.w, availH / base.h))
   viewScale.value = scale
-  /* h(pad) = h(0) + pad * (maxEmp + 1):部门行下沉、岗位首行、逐行间距各吃一份 */
-  const slack = (availH / scale - base.h) / (base.maxEmp + 1)
+  /* h(pad) = h(0) + pad * (maxEmp + 1):部门行下沉、岗位首行、逐行间距各吃一份。
+     只有「宽度先撞线」时才真有多余高度可分 —— 那时 availH/scale > base.h。
+     高度先撞线时这里必然是 0,不能凭空撑高:撑高会写进下一轮的比例里,
+     结果是越算越小,整张图被自己的留白压掉一截。 */
+  const extra = availH / scale - base.h
+  const slack = extra > 0 ? extra / (base.maxEmp + 1) : 0
   vPad.value = Math.max(0, Math.min(MAX_PAD, Math.round(slack)))
   nextTick(() => {
     if (el.scrollWidth > el.clientWidth) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
   })
 }
 
-/* 图纸几何:每一处纵向留白都跟着 vPad 走,连线/芯片读同一份坐标,不会错位 */
-const DEPT_Y = 300, DEPT_EMP_GAP = 56, EMP_ROW_GAP = 20, BOTTOM_PAD = 40
+/* 图纸几何:每一处纵向留白都跟着 vPad 走,连线/读同一份坐标,不会错位。
+   纵向这几档都收了一格:整张图是按「一屏看全」缩放的,省下 30px 图高
+   就能把适配比例从 .88 抬到 .90 以上 —— 每一点都直接变成字大一号。 */
+const DEPT_Y = 268, DEPT_EMP_GAP = 48, EMP_ROW_GAP = 16, BOTTOM_PAD = 26
 function layout(pad) {
   const depts = org.value.departments || []
   const cols = depts.length || 1
@@ -458,12 +510,21 @@ const links = computed(() => {
   const n = nodes.value
   const list = []
   const TOP = LINK_TOP
-  ;(org.value.departments || []).forEach(d => {
+  const depts = org.value.departments || []
+  const cnt = depts.length || 1
+  depts.forEach((d, i) => {
     const dn = n.depts[d.id]
     const color = deptColor(d.colorKey)
+    /* 起点沿 CEO 卡底边铺开 —— 五条线如果都从同一个点出发,
+       在浅带宽里会挤成一个结(两条线还互相穿过),看起来像根打了结的电线。
+       铺开之后是一把扇子:起点本来就有先后的位置关系。 */
+    const t = cnt > 1 ? i / (cnt - 1) : .5
+    const sx = n.ceo.x + (t - .5) * CEO_W * .58
+    const dy = dn.y - DEPT_H / 2
+    const span = dy - TOP
     list.push({
       id: 'c-' + d.id,
-      d: `M ${n.ceo.x} ${TOP} C ${n.ceo.x} ${TOP + 40}, ${dn.x} ${TOP - 10}, ${dn.x} ${dn.y - DEPT_H / 2}`,
+      d: `M ${sx} ${TOP} C ${sx} ${TOP + span * .52}, ${dn.x} ${dy - span * .4}, ${dn.x} ${dy}`,
       color,
       active: ceoStatus.value === 'RUNNING' || d.employees.some(e => e.status === 'RUNNING'),
       dur: 5
@@ -482,27 +543,34 @@ const links = computed(() => {
   return list
 })
 
-/* 流转标注芯片位置:CEO→部门连线中点 */
-const edgeChips = computed(() => {
-  const n = nodes.value
-  const chips = []
-  ;(org.value.departments || []).forEach(d => {
-    const dn = n.depts[d.id]
-    const s = stats.value
-    let pending = 0, doneToday = 0
+/* 部门负载:五个部门排在同一条基线上,才能一眼比出谁压着活、谁今天没动。
+   柱高按「完成 + 待处理」的部门最大值归一到 44px,实心是已交付、斜纹是还压着。 */
+const LOAD_H = 44
+const loadBars = computed(() => {
+  const s = stats.value
+  const rows = (org.value.departments || []).map(d => {
+    let pending = 0, done = 0
     d.employees.forEach(e => {
       const st = s[e.id]
-      if (st) { pending += st.pending || 0; doneToday += st.doneToday || 0 }
+      if (st) { pending += st.pending || 0; done += st.doneToday || 0 }
     })
-    chips.push({
-      deptId: d.id,
-      x: dn.x,
-      y: (LINK_TOP + (dn.y - DEPT_H / 2)) / 2 + 6,
-      pending, doneToday,
-      color: deptColor(d.colorKey)
-    })
+    return {
+      id: d.id,
+      name: d.name,
+      short: (d.name || '').replace(/部$/, '') || '—',
+      color: deptColor(d.colorKey),
+      pending, done
+    }
   })
-  return chips
+  const max = Math.max(1, ...rows.map(r => r.done + r.pending))
+  rows.forEach(r => {
+    r.donePx = Math.round(LOAD_H * r.done / max)
+    r.pendPx = Math.round(LOAD_H * r.pending / max)
+    r.hint = r.done + r.pending === 0
+      ? `${r.name}:今天还没派活`
+      : `${r.name}:今日完成 ${r.done} 件 · 待处理 ${r.pending} 件`
+  })
+  return rows
 })
 
 const size = computed(() => ({ w: nodes.value.w, h: nodes.value.h }))
@@ -519,11 +587,6 @@ function dotClass(e) {
     ERROR: 'dot-error',
     DISABLED: 'dot-off'
   }[e.status] || 'dot-idle'
-}
-
-function hhmm(iso) {
-  if (!iso) return ''
-  return new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 function open(e) { selected.value = e; panelOpen.value = true }
@@ -697,8 +760,7 @@ function bumpStats(empId) {
   100% { box-shadow: 0 0 0 1px rgba(var(--rgb-glow), .18); }
 }
 /* 交活:统计数字弹一下 */
-.node-card.emp.rippling .st-num,
-.node-card.emp.rippling .st-metric-num { animation: popScore .6s cubic-bezier(.34, 1.56, .64, 1) both; }
+.node-card.emp.rippling .st-hero b { animation: popScore .6s cubic-bezier(.34, 1.56, .64, 1) both; }
 
 .org-chart {
   position: relative; height: calc(100vh - 140px);
@@ -707,11 +769,15 @@ function bumpStats(empId) {
 .canvas-wrap { flex: 1; min-height: 0; overflow: auto; padding: 14px; position: relative; z-index: 1; }
 .chart-svg { display: block; margin: 0 auto; }
 
-/* ===== 全息底:透视网格地平线 / 星尘 / 慢扫光 / 暗角(铺满整块舞台) ===== */
+/* ===== 全息底:透视网格地平线 / 星尘 / 慢扫光 / 暗角(铺满整块舞台)
+   四层全部乘 --org-fx。它默认是 1(墨夜),宣纸与素白是 0 —— 原来这几层
+   不受任何令牌控制,于是在纸上会透出一张朱砂色的透视地网,在浅底上压一层暗角。
+   那不是"另一个主题的装饰",是画错了地方。 ===== */
 .h-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .h-floor, .h-stars, .h-scan, .h-vig { position: absolute; pointer-events: none; }
 .h-floor {
   left: -25%; right: -25%; bottom: 0; height: 56%;
+  opacity: calc(.9 * var(--org-fx));
   transform: perspective(560px) rotateX(68deg); transform-origin: bottom center;
   background-image:
     linear-gradient(color-mix(in srgb, var(--glow-cyan) 9%, transparent) 1px, transparent 1px),
@@ -724,7 +790,7 @@ function bumpStats(empId) {
 @keyframes floorRun { to { background-position: 0 70px, 0 0; } }
 
 .h-stars {
-  inset: 0; opacity: var(--stardust);
+  inset: 0; opacity: calc(var(--stardust) * var(--org-fx));
   background-image:
     radial-gradient(1px 1px at 14% 22%, var(--glow-cyan), transparent),
     radial-gradient(1px 1px at 32% 68%, var(--warm), transparent),
@@ -735,35 +801,42 @@ function bumpStats(empId) {
   animation: twinkle 6.5s var(--ease-quiet) infinite alternate;
 }
 @keyframes twinkle {
-  from { opacity: calc(var(--stardust) * .38); }
-  to { opacity: var(--stardust); }
+  from { opacity: calc(var(--stardust) * var(--org-fx) * .38); }
+  to { opacity: calc(var(--stardust) * var(--org-fx)); }
 }
 
 .h-scan {
   left: 0; right: 0; top: -40%; height: 38%;
   background: linear-gradient(180deg, transparent, rgba(var(--rgb-glow), .07), transparent);
-  opacity: var(--fx-a);
+  opacity: calc(.55 * var(--org-fx));
   animation: scanDown 8.5s var(--ease-quiet) infinite;
 }
 @keyframes scanDown { from { transform: translateY(0); } to { transform: translateY(360%); } }
 
 .h-vig {
   inset: 0;
-  background: radial-gradient(122% 104% at 50% 44%, transparent 42%, rgba(var(--rgb-shadow), calc(.5 * var(--fx-a))) 100%);
+  background: radial-gradient(122% 104% at 50% 44%, transparent 42%, rgba(var(--rgb-shadow), calc(.5 * var(--org-fx))) 100%);
 }
 
-/* ===== CEO 核心:搏动光环 + 反向旋转的双环刻度 ===== */
+/* ===== CEO 冠冕:一段刻度弧 + 缓慢巡行的高光 ===== */
 .ceo-core { pointer-events: none; }
-.core-halo, .spin-slow, .spin-rev { transform-box: fill-box; transform-origin: 50% 50%; }
-.core-halo { animation: coreBreath 3.4s var(--ease-quiet) infinite; }
-@keyframes coreBreath {
-  0%, 100% { opacity: .34; transform: scale(.93); }
-  50% { opacity: .74; transform: scale(1.07); }
+.core-halo {
+  transform-box: fill-box; transform-origin: 50% 50%;
+  animation: coreBreath 4.2s var(--ease-quiet) infinite;
 }
-.spin-slow { animation: holoSpin 26s linear infinite; }
-.spin-rev { animation: holoSpin 38s linear infinite reverse; }
-@keyframes holoSpin { to { transform: rotate(360deg); } }
-.tick { stroke-linecap: round; }
+@keyframes coreBreath {
+  0%, 100% { opacity: .5; transform: scale(.97); }
+  50% { opacity: .92; transform: scale(1.03); }
+}
+.crest-arc { stroke-width: 1; stroke-opacity: .22; }
+/* 巡行高光:16px 长的一段亮弧沿冠冕走一圈(路径长约 296),像仪表上的扫描指针 */
+.crest-sweep {
+  stroke-width: 1.6; stroke-linecap: round;
+  stroke-dasharray: 16 300;
+  animation: crestSweep 7.5s linear infinite;
+}
+@keyframes crestSweep { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -316; } }
+.crest-tick { stroke-linecap: round; }
 
 /* ===== 载入失败:浮在图纸中央的一张说明卡 ===== */
 .org-fail {
@@ -790,6 +863,34 @@ function bumpStats(empId) {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center; gap: 12px;
   animation: riseIn .45s var(--ease-out) both;
+}
+
+/* ===== 空组织:一张空图纸也得说得清下一步做什么 ===== */
+.org-empty {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px; pointer-events: none;
+}
+.empty-card {
+  pointer-events: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 40px 52px 36px; text-align: center; max-width: 520px; gap: 13px;
+  animation: riseIn .5s var(--ease-out) both;
+}
+/* 三个空格:中间那个是虚线的 —— 图纸上还没画上去的那一格 */
+.empty-mark { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.empty-mark i { display: block; width: 36px; height: 24px; border-radius: 6px; }
+.empty-mark i:first-child, .empty-mark i:last-child {
+  border: 1px solid var(--border-hair-strong); opacity: .45;
+}
+.empty-mark i:nth-child(2) {
+  border: 1px dashed color-mix(in srgb, var(--glow-cyan) 50%, transparent);
+  background: color-mix(in srgb, var(--glow-cyan) 7%, transparent);
+}
+.empty-title { margin: 0; font-size: 19px; letter-spacing: .3em; margin-left: .3em; color: var(--text-moon); font-weight: 300; }
+.empty-text {
+  margin: 0 0 8px; font-size: 12.5px; line-height: 2.1; letter-spacing: .06em;
+  color: var(--text-dim);
 }
 .ld-ring {
   width: 16px; height: 16px; border-radius: 50%;
@@ -827,15 +928,16 @@ function bumpStats(empId) {
 .hud-read i { font-style: normal; font-size: 9.5px; letter-spacing: .2em; color: var(--text-faint); }
 .clock { font-family: var(--font-mono); font-size: 13px; color: var(--glow-cyan); letter-spacing: .1em; }
 
-/* ===== 底部 HUD 带:事件流 · 图例落款 · 兵力仪表 ===== */
+/* ===== 底部 HUD 带:事件流(弹性) · 部门负载(固定) · 兵力仪表 ===== */
 /* ===== HUD 浮空带:贴在图纸下沿,不再从舞台里切走一条高度 ===== */
 .hud-rail {
   position: absolute; left: 14px; right: 14px; bottom: 10px; z-index: 3;
-  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  display: flex; align-items: flex-end; gap: 14px;
   pointer-events: none;
 }
-/* 事件流照设计稿:左下固定宽度竖排浮窗,不横贯整行 */
-.hud-feed { flex: 0 0 340px; width: 340px; min-width: 0; padding: 8px 14px 6px; pointer-events: auto; }
+/* 事件流拿走剩下的全部宽度。它原来是写死的 340px —— 那句话放不下,
+   于是每一条都以「…」收尾,五条读下来一条也没读完。宽度给够,字就不用砍。 */
+.hud-feed { flex: 1 1 auto; min-width: 260px; padding: 8px 14px 6px; pointer-events: auto; }
 .hf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
 .hf-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); }
 .hf-live {
@@ -844,7 +946,7 @@ function bumpStats(empId) {
 }
 .hf-live.quiet { background: var(--st-off); box-shadow: none; animation: none; }
 .hf-hint { font-size: 9.5px; letter-spacing: .1em; color: var(--text-faint); margin-left: auto; }
-.hf-list { height: 100px; overflow: hidden; }
+.hf-list { position: relative; height: 96px; overflow: hidden; }
 .hf-line {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: baseline; gap: 8px; padding: 1.5px 0;
@@ -853,14 +955,21 @@ function bumpStats(empId) {
   font-size: 8.5px; letter-spacing: .1em; padding: 1px 6px; border-radius: 3px;
   border: 1px solid var(--border-hair); color: var(--text-dim); white-space: nowrap;
 }
+/* 同类型连着来时不重复标签:隐掉但占位,列不会跳 */
+.hf-tag.is-dup { visibility: hidden; }
 .hf-text {
-  display: block; font-size: 11px; color: var(--text-dim);
+  display: block; font-size: 11px; line-height: 1.5; color: var(--text-dim);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+/* 最新一条给两行 —— 它才是你真正要读的那句 */
+.hf-line.is-head .hf-text {
+  white-space: normal;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
 .hf-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
 /* 队首那条是刚到的:clip 逐格揭开 + 光标收尾 */
-.hf-line:first-child .hf-text { animation: typeIn .8s steps(28, end) both; }
-.hf-line:first-child .hf-text::after {
+.hf-line.is-head .hf-text { animation: typeIn .8s steps(28, end) both; }
+.hf-line.is-head .hf-text::after {
   content: "▌"; margin-left: 3px; color: var(--glow-cyan);
   animation: caretOut 1s var(--ease-quiet) both;
 }
@@ -876,18 +985,58 @@ function bumpStats(empId) {
 .tone-warn .hf-tag { border-color: rgba(var(--rgb-warn), .34); color: var(--st-warn); }
 .tone-error .hf-tag { border-color: rgba(var(--rgb-error), .34); color: var(--st-error); }
 .tone-plan .hf-tag { border-color: rgba(var(--rgb-plan), .34); color: var(--st-plan); }
-.hf-none { margin: 6px 0 0; font-size: 10.5px; letter-spacing: .1em; color: var(--text-faint); }
+.hf-none { position: absolute; inset: 0; margin: 0; padding-top: 6px; font-size: 10.5px; letter-spacing: .1em; color: var(--text-faint); }
 
-.hud-mid { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
-.hud-legend { display: flex; align-items: center; gap: 12px; }
-.lg { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; letter-spacing: .16em; color: var(--text-faint); }
-.lg-dot { width: 6px; height: 6px; border-radius: 50%; }
+/* ===== 部门负载:五个部门站在同一条基线上,才能横着比 ===== */
+.hud-load { flex: 0 0 384px; padding: 7px 14px 8px; pointer-events: auto; }
+.hl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.hl-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); white-space: nowrap; }
+.hud-legend { display: flex; align-items: center; gap: 10px; }
+.lg { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; letter-spacing: .12em; color: var(--text-faint); }
+.lg-dot { width: 5px; height: 5px; border-radius: 50%; }
 .lg-idle { background: var(--st-idle); }
 .lg-run { background: var(--st-running); box-shadow: 0 0 6px rgba(var(--rgb-glow), .65); }
 .lg-err { background: var(--st-error); }
 .lg-off { background: var(--st-off); }
-.chart-slogan { pointer-events: none; }
-.slogan-text { font-size: 11px; letter-spacing: .42em; margin-left: .42em; color: var(--text-faint); font-family: var(--font-serif); }
+.hl-bars {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
+  /* 一条基线把所有柱子串起来:没有它,五根高低不同的柱各浮各的,读不出"比" */
+  border-bottom: 1px solid var(--border-hair-strong);
+  padding-top: 15px;   /* 给最高的那根柱子顶上的数字留位置 */
+}
+.hl-bar { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.hl-track {
+  position: relative; width: 30px; height: 44px;
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.hl-num {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font: 600 11px/1 var(--font-mono); color: var(--text-moon); white-space: nowrap;
+}
+.hl-pend-num { font-style: normal; color: var(--st-warn); font-size: 9px; margin-left: 1px; }
+.hl-fill { display: block; width: 100%; flex: none; }
+.hl-fill.is-done { opacity: .85; border-radius: 2px 2px 0 0; }
+/* 待处理用斜纹:实心是已经交出去的活,斜纹是还压在这一格上的 */
+.hl-fill.is-pend {
+  background-image: repeating-linear-gradient(45deg,
+    rgba(var(--rgb-warn), .85) 0 2px, rgba(var(--rgb-warn), .32) 2px 4px);
+  background-color: rgba(var(--rgb-warn), .18);
+}
+.hl-name {
+  font-size: 9.5px; letter-spacing: .1em; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  color: var(--dept-color);
+}
+
+/* ===== 落款:竖排进右侧留白,像画上的边款 ===== */
+.chart-slogan {
+  position: absolute; right: 24px; top: 46%; transform: translateY(-50%);
+  z-index: 1; pointer-events: none; opacity: .7;
+}
+.chart-slogan span {
+  writing-mode: vertical-rl; font-family: var(--font-serif);
+  font-size: 11px; letter-spacing: .46em; color: var(--text-faint);
+}
 
 .hud-gauges { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 7px 14px; pointer-events: auto; }
 .gauge { position: relative; width: 58px; height: 58px; }
@@ -897,17 +1046,6 @@ function bumpStats(empId) {
 .g-read { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2px; }
 .g-read b { font-family: var(--font-mono); font-size: 16px; font-weight: 600; line-height: 1; }
 .g-read i { font-style: normal; font-size: 8.5px; letter-spacing: .14em; color: var(--text-faint); }
-
-/* ===== 流转标注芯片 ===== */
-.edge-chip {
-  width: 100%; height: 100%; border-radius: 999px;
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 0 12px;
-  border-color: color-mix(in srgb, var(--dept-color) 28%, transparent);
-}
-.chip-down, .chip-up { font-size: 10.5px; letter-spacing: .06em; white-space: nowrap; font-family: var(--font-mono); }
-.chip-down { color: var(--text-dim); }
-.chip-up { color: color-mix(in srgb, var(--dept-color) 80%, white); }
 
 /* ===== 节点卡片 ===== */
 .node-card {
@@ -979,7 +1117,7 @@ function bumpStats(empId) {
 .node-card.ceo:hover { border-color: rgba(var(--rgb-glow), .6);
   box-shadow: 0 0 26px rgba(var(--rgb-glow), .12), var(--shadow-soft); }
 .ceo-seal { opacity: .9; }
-.node-card.ceo .node-name { font-size: 16px; letter-spacing: .3em; margin-left: .3em; }
+.node-card.ceo .node-name { font-size: 17px; letter-spacing: .28em; margin-left: .28em; }
 
 .node-card.dept { padding: 8px; border-color: color-mix(in srgb, var(--dept-color) 32%, transparent);
   background: linear-gradient(155deg, color-mix(in srgb, var(--dept-color) 7%, rgba(var(--rgb-panel-hi), .9)), rgba(var(--rgb-surface-2), .9));
@@ -998,7 +1136,7 @@ function bumpStats(empId) {
   transform: skewX(-18deg); transition: left .7s var(--ease-out); pointer-events: none;
 }
 .node-card.dept:hover::after { left: 120%; }
-.node-card.dept .node-name { color: var(--dept-color); font-size: 14px; letter-spacing: .28em; margin-left: .28em; }
+.node-card.dept .node-name { color: var(--dept-color); font-size: 15px; letter-spacing: .24em; margin-left: .24em; }
 
 .node-card.emp {
   flex-direction: row; align-items: center; gap: 12px; padding: 0 14px 0 12px;
@@ -1028,7 +1166,7 @@ function bumpStats(empId) {
   opacity: .6;
 }
 .lead-badge {
-  flex: none; font-size: 8.5px; letter-spacing: .06em; padding: 1px 6px; border-radius: 999px;
+  flex: none; font-size: 9px; letter-spacing: .04em; padding: 1px 6px; border-radius: 999px;
   color: color-mix(in srgb, var(--dept-color) 85%, white);
   background: color-mix(in srgb, var(--dept-color) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--dept-color) 25%, transparent);
@@ -1037,28 +1175,39 @@ function bumpStats(empId) {
 
 .emp-body { flex: 1; min-width: 0; }
 .emp-head { display: flex; align-items: center; gap: 8px; }
-.node-name { font-size: 13.5px; letter-spacing: .12em; white-space: nowrap; }
+.node-name { font-size: 15px; letter-spacing: .1em; white-space: nowrap; }
 .node-title {
-  font-size: 11px; color: var(--text-dim); letter-spacing: .08em; margin-top: 3px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 138px;
+  font-size: 12px; color: var(--text-dim); letter-spacing: .06em; margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 158px;
 }
-.is-running .node-title { color: var(--glow-cyan); font-family: var(--font-mono); font-size: 10.5px; }
+.is-running .node-title { color: var(--glow-cyan); font-family: var(--font-mono); font-size: 11.5px; }
 
+/* 岗位数据:今日(主) | 一道实分栏 | 累计 / 自定义指标 / 待
+   数值色统一和 --text-moon 调:深底上提亮、纸上压深 —— 直接混白在浅色主题上会发虚。 */
 .emp-stats {
-  margin-top: 5px; font-size: 10px; color: var(--text-faint);
-  font-family: var(--font-mono); letter-spacing: .04em;
-  display: flex; align-items: center; white-space: nowrap;
+  margin-top: 4px; font-size: 10px; color: var(--text-faint);
+  font-family: var(--font-mono); letter-spacing: .03em;
+  display: flex; align-items: center; gap: 0; white-space: nowrap;
 }
-.st-num { color: color-mix(in srgb, var(--dept-color) 75%, white); font-size: 11px; }
-.st-metric { display: inline-flex; align-items: baseline; gap: 4px; color: var(--dept-color); }
-.st-metric-num { font-family: var(--font-mono); font-size: 14px; font-weight: 600;
-                 color: color-mix(in srgb, var(--dept-color) 85%, white);
-                 text-shadow: 0 0 12px color-mix(in srgb, var(--dept-color) 40%, transparent); }
-.st-pending { color: var(--st-warn); }
-.st-sep { display: inline-block; width: 1px; height: 9px; background: var(--border-hair-strong);
-          margin: 0 6px; opacity: .7; }
+.st-hero { display: inline-flex; align-items: baseline; gap: 3px; }
+.st-hero b {
+  font-size: 15.5px; font-weight: 600; line-height: 1;
+  color: color-mix(in srgb, var(--dept-color) 78%, var(--text-moon));
+  text-shadow: 0 0 12px color-mix(in srgb, var(--dept-color) 30%, transparent);
+}
+.st-hero i { font-style: normal; font-size: 9.5px; color: var(--text-faint); }
+/* 两组之间用一道齐高的实线,而不是 9px 的小点线:分栏要能被看见,才叫分栏 */
+.st-split {
+  display: inline-block; width: 1px; height: 15px; background: var(--border-hair-strong);
+  margin: 0 8px; flex: none;
+}
+.st-pair { display: inline-flex; align-items: baseline; gap: 2px; }
+.st-pair + .st-pair { margin-left: 8px; }
+.st-pair b { font-size: 12px; font-weight: 600; color: var(--text-moon); }
+.st-pair.is-pending { color: var(--st-warn); }
+.st-pair.is-pending b { color: var(--st-warn); }
 
-.status-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-left: auto; position: relative; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-left: auto; position: relative; }
 .dot-idle { background: var(--st-idle); }
 .dot-running { background: var(--st-running); box-shadow: 0 0 8px rgba(var(--rgb-glow), .7); animation: dotBlink 2s ease-in-out infinite; }
 .dot-error { background: var(--st-error); box-shadow: 0 0 8px rgba(var(--rgb-error), .6); }
@@ -1095,9 +1244,20 @@ function bumpStats(empId) {
 }
 @keyframes progSlide { from { transform: translateX(-110%); } to { transform: translateX(320%); } }
 
+/* 窄屏右侧留白不够,边款会压到最后一列的卡片上 —— 它不是信息,先收 */
+@media (max-width: 1360px) {
+  .chart-slogan { display: none; }
+}
+@media (max-width: 1180px) {
+  .hud-load { flex: 0 0 300px; }
+  .hl-bars { gap: 6px; }
+  .hl-track { width: 20px; }
+}
 @media (max-width: 900px) {
+  .hud-rail { flex-wrap: wrap; }
+  .hud-feed { flex: 1 1 100%; }
+  .hud-load { flex: 1 1 auto; }
   .hud-legend { display: none; }
-  .hud-feed { flex: 1 1 100%; width: auto; }
   .hf-list { height: 60px; }
   .gauge, .g-arc { width: 46px; height: 46px; }
 }
