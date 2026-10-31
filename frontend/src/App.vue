@@ -209,18 +209,21 @@ async function doLogin() {
 
 /* ===== 特效层:极光 + 流星 ===== */
 .fx-layer { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+/* 极光是「底噪」,不是「光效」。原来 0.5 的存在感会透过半透明卡面,
+   把整页染成一层灰绿;收掉三成之后,青色就重新变成信号 ——
+   只有正在跑的东西才发光。 */
 .aurora {
   position: absolute; width: 720px; height: 720px; border-radius: 50%;
-  filter: blur(90px); opacity: calc(.5 * var(--fx-a)); will-change: transform;
+  filter: blur(90px); opacity: calc(.36 * var(--fx-a)); will-change: transform;
 }
 .aurora-a {
   left: -200px; top: -260px;
-  background: radial-gradient(circle, rgba(var(--rgb-glow), .16), transparent 65%);
+  background: radial-gradient(circle, rgba(var(--rgb-glow), .14), transparent 65%);
   animation: driftA 46s ease-in-out infinite alternate;
 }
 .aurora-b {
   right: -240px; bottom: -300px;
-  background: radial-gradient(circle, rgba(var(--rgb-plan), .13), transparent 65%);
+  background: radial-gradient(circle, rgba(var(--rgb-plan), .11), transparent 65%);
   animation: driftB 58s ease-in-out infinite alternate;
 }
 @keyframes driftA {
@@ -262,16 +265,19 @@ async function doLogin() {
 .topbar {
   position: sticky; top: 14px; z-index: 20;
   margin: 14px 26px 0; padding: 13px 24px;
-  display: flex; align-items: center; gap: 40px;
+  display: flex; align-items: center; gap: 26px;
 }
 .brand { display: flex; align-items: center; gap: 13px; cursor: pointer; flex: none; white-space: nowrap; }
 .brand-name { font-size: 19px; font-weight: 300; letter-spacing: .42em; margin-left: .1em; white-space: nowrap; }
 .brand-en { font-size: 10px; letter-spacing: .34em; color: var(--text-faint); font-family: var(--font-mono); white-space: nowrap; }
-.nav { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 7 个板块 + 播放 + 主题 + 在线状态,在 1440 的屏上本来正好。
+   flex-wrap 一开,挤不下的那一项不会缩,只会掉到第二行 —— 「设置」单独
+   挂在下边,整个顶栏像被截断了。宁可挤一点,也不许折行。 */
+.nav { display: flex; gap: 2px; flex-wrap: nowrap; }
 .nav-link {
   position: relative; white-space: nowrap;
   color: var(--text-dim); text-decoration: none; font-size: 14px;
-  letter-spacing: .2em; padding: 7px 18px; border-radius: 9px;
+  letter-spacing: .13em; padding: 7px 13px; border-radius: 9px;
   transition: all .4s var(--ease-quiet);
 }
 .nav-link::after {
@@ -284,7 +290,9 @@ async function doLogin() {
 .nav-link.router-link-active {
   color: var(--glow-cyan);
   background: var(--glow-cyan-faint);
-  text-shadow: 0 0 14px rgba(var(--rgb-glow), .35);
+  /* 选中态原来带 14px 的字辉,在深底上会让「看板」两个字失去边缘。
+     留一点点就够 —— 选中靠底色和下方那道短线,不靠发光。 */
+  text-shadow: 0 0 10px rgba(var(--rgb-glow), .18);
 }
 .nav-link.router-link-active::after { width: 26px; }
 /* 待批角标:它不是装饰,是"有东西在等你点头"的唯一提示 */
@@ -354,9 +362,15 @@ async function doLogin() {
 .llm-alert .alert-go:hover { color: var(--glow-cyan); }
 .alert-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--st-error); box-shadow: 0 0 8px var(--st-error); animation: pulseDot 2.2s var(--ease-quiet) infinite; flex: none; }
 .auth-hint { color: var(--st-error); font-size: 12px; margin: 10px 0 0; }
-@media (max-width: 1100px) {
+/* 顶栏是「品牌 + 导航 + 状态」三段,宽度先保导航完整;
+   英文副标是唯一可以牺牲的装饰,窗口一窄就收掉 */
+@media (max-width: 1380px) {
   .brand-en { display: none; }
-  .topbar { gap: 20px; }
+}
+@media (max-width: 1180px) {
+  .topbar { gap: 16px; }
+  .nav-link { padding: 7px 9px; letter-spacing: .06em; }
+  .corp { margin-left: 4px; gap: 7px; }
 }
 @media (max-width: 760px) {
   .topbar { gap: 12px; padding: 10px 14px; margin: 10px 12px 0; flex-wrap: wrap; }

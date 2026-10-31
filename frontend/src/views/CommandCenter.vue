@@ -571,8 +571,8 @@ onBeforeUnmount(() => {
 .hero { position: relative; padding: 34px 0 4px; }
 .hero-glow {
   position: absolute; left: 8%; right: 8%; top: -60px; height: 360px; pointer-events: none;
-  background: radial-gradient(ellipse at 50% 30%, rgba(var(--rgb-glow), .1), transparent 62%);
-  filter: blur(30px);
+  background: radial-gradient(ellipse at 50% 30%, rgba(var(--rgb-glow), .062), transparent 62%);
+  filter: blur(44px);
 }
 .hero-inner { position: relative; }
 .eyebrow {
@@ -591,7 +591,9 @@ onBeforeUnmount(() => {
 }
 .hero-title .thin {
   font-weight: 200; color: transparent;
-  background: linear-gradient(100deg, rgba(var(--rgb-ink), .92), var(--glow-cyan) 62%, rgba(var(--rgb-glow), .55));
+  /* 原来是「白 → 半透明青」,尾段那两个字在深底上会暗下去,像写了一半没墨了。
+     改成前三分之二保持白、末尾才转青 —— 青是落款,不是褪色。 */
+  background: linear-gradient(100deg, rgba(var(--rgb-ink), .95) 0%, rgba(var(--rgb-ink), .9) 54%, rgba(var(--rgb-glow), .9) 100%);
   -webkit-background-clip: text; background-clip: text;
 }
 .hero-sub {
@@ -694,7 +696,7 @@ onBeforeUnmount(() => {
 }
 .pulse-card:hover { border-color: rgba(var(--rgb-glow), .2); transform: translateY(-2px); }
 .pulse-num { font-family: var(--font-mono); font-size: 24px; font-weight: 200; letter-spacing: .02em; }
-.pulse-num.cyan { color: var(--glow-cyan); text-shadow: 0 0 16px rgba(var(--rgb-glow), .3); }
+.pulse-num.cyan { color: var(--glow-cyan); text-shadow: 0 0 14px rgba(var(--rgb-glow), .16); }
 .pulse-num.warn { color: var(--st-warn); }
 .pulse-label { margin-top: 5px; font-size: 10px; letter-spacing: .2em; color: var(--text-faint); }
 .pulse-line {

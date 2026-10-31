@@ -1039,14 +1039,14 @@ onBeforeUnmount(() => {
 .needs {
   padding: 18px 24px 20px; border-radius: 14px;
   border: 1px solid rgba(var(--rgb-warn), .32);
-  background: linear-gradient(165deg, rgba(var(--rgb-warn), .07), rgba(var(--rgb-surface-2), .66));
+  background: linear-gradient(165deg, rgba(var(--rgb-warn), .055), rgba(var(--rgb-surface-2), .92));
   animation: riseIn .5s var(--ease-out) both;
 }
 /* 预算用尽:比缺料更"硬"的信号,用错误色,但同样给出口 */
 .budget {
   padding: 18px 24px 20px; border-radius: 14px;
   border: 1px solid rgba(var(--rgb-error), .34);
-  background: linear-gradient(165deg, rgba(var(--rgb-error), .07), rgba(var(--rgb-surface-2), .66));
+  background: linear-gradient(165deg, rgba(var(--rgb-error), .055), rgba(var(--rgb-surface-2), .92));
   animation: riseIn .5s var(--ease-out) both;
 }
 .budget-head { display: flex; flex-direction: column; gap: 6px; }
@@ -1065,13 +1065,22 @@ onBeforeUnmount(() => {
 }
 .needs-head h3 { margin: 2px 0 0; font-size: 15px; font-weight: 300; letter-spacing: .1em; color: var(--text-moon); }
 .needs-head p { margin: 0; font-size: 11.5px; line-height: 1.8; color: var(--text-dim); }
-.needs-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.needs-list li {
-  display: flex; gap: 12px; font-size: 12.5px; line-height: 1.75; color: var(--text-moon);
-  padding: 9px 12px; border-radius: 9px; background: rgba(var(--rgb-warn), .05);
-  border-left: 2px solid rgba(var(--rgb-warn), .4);
+/* 12 张暖色便签叠在一张暖色卡里,叠出来是一块发棕的糊 —— 信息没变清楚,
+   只是变重了。这里退回清单:一条一条,靠编号对齐和发丝分隔线站住,
+   整块仍然是暖的,但不再抢那张卡片本身的权重。 */
+.needs-list {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  border-top: 1px solid rgba(var(--rgb-warn), .16);
 }
-.needs-no { font-family: var(--font-mono); font-size: 10.5px; color: var(--st-warn); flex: none; padding-top: 2px; }
+.needs-list li {
+  display: flex; gap: 14px; font-size: 12.5px; line-height: 1.8; color: var(--text-moon);
+  padding: 10px 2px; border-bottom: 1px solid rgba(var(--rgb-warn), .1);
+}
+.needs-list li:last-child { border-bottom: none; }
+.needs-no {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--st-warn);
+  flex: none; width: 18px; padding-top: 3px; text-align: right; opacity: .85;
+}
 .needs-form { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
 .needs-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .needs-hint { font-size: 11px; color: var(--text-faint); }
@@ -1103,7 +1112,9 @@ onBeforeUnmount(() => {
 .ps-done::before { background: rgba(var(--rgb-glow), .8) }
 .ps-done .pnum { color: var(--glow-cyan) }
 .ps-done .pname { color: var(--text-moon) }
-.ps-wait { opacity: .42; transition: opacity var(--dur-mid) var(--ease-quiet) }
+/* 未开始的步骤原来整体压到 42%,深底上直接消失 —— 页面看起来像
+   「只有一步」。压到 60%:它仍然退后,但你能看见后面还有三步要走。 */
+.ps-wait { opacity: .6; transition: opacity var(--dur-mid) var(--ease-quiet) }
 .ps-run::before {
   background: linear-gradient(90deg, var(--glow-cyan), var(--warm), var(--glow-cyan));
   background-size: 220% 100%; animation: flowDash 1.9s linear infinite; opacity: 1;

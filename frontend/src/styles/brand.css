@@ -14,11 +14,15 @@
   --rgb-design: 240, 188, 205;
   --rgb-veil: 255, 255, 255;      /* 提亮蒙版 */
   --rgb-shadow: 0, 0, 0;          /* 投影 */
-  --rgb-surface: 22, 26, 38;      /* 玻璃面板亮端 */
-  --rgb-surface-2: 14, 17, 25;    /* 玻璃面板暗端 */
-  --rgb-panel: 18, 21, 31;        /* 抽屉 / 对话框 */
-  --rgb-panel-hi: 24, 29, 42;     /* 抬起的次级面 */
-  --rgb-raise: 34, 41, 60;        /* 选中态面 */
+  /* 表面阶梯:深色界面里「浮起」不靠投影(深底上投影是看不见的),
+     只能靠面色本身比背景亮一档。原来 22/14/18 三档差得太近,
+     卡片就和背景糊在一起 —— 整个页面看起来像一张半透明的膜。
+     这里把每一档往上提,拉力全部交给面色差。 */
+  --rgb-surface: 27, 32, 46;      /* 玻璃面板亮端 */
+  --rgb-surface-2: 18, 22, 32;    /* 玻璃面板暗端 */
+  --rgb-panel: 22, 26, 37;        /* 抽屉 / 对话框 */
+  --rgb-panel-hi: 30, 36, 51;     /* 抬起的次级面 */
+  --rgb-raise: 40, 48, 70;        /* 选中态面 */
   --rgb-boss: 23, 38, 40;         /* CEO 位暖绿面 */
   --rgb-error-deep: 160, 82, 82;
   --rgb-error-deeper: 125, 61, 61;
@@ -31,10 +35,13 @@
   --bg-ink: #07090e;
   --bg-ink-2: #0e1119;
   --text-moon: rgb(var(--rgb-ink));
-  --text-dim: rgba(var(--rgb-ink), .58);
-  --text-faint: rgba(var(--rgb-ink), .32);
-  --border-hair: rgba(var(--rgb-ink), .09);
-  --border-hair-strong: rgba(var(--rgb-ink), .18);
+  /* 三级灰在深底上会被抗锯齿再吃掉一层:.58 在 #07090e 上大约 6:1,
+     够读;.32 只有 2.6:1,那批 9~11px 的编号、时间戳、说明就真的糊了。
+     提亮是修可读性,不是让页面变吵 —— faint 仍然是「扫一眼就知道不重要」的那一档。 */
+  --text-dim: rgba(var(--rgb-ink), .66);
+  --text-faint: rgba(var(--rgb-ink), .40);
+  --border-hair: rgba(var(--rgb-ink), .12);
+  --border-hair-strong: rgba(var(--rgb-ink), .24);
 
   /* 格光 · 天青 */
   --glow-cyan: rgb(var(--rgb-glow));
@@ -59,24 +66,27 @@
   --dept-ops: rgb(var(--rgb-ok));
 
   /* 表面层次:先给颜料,再给别名 */
-  --chip-bg: rgba(var(--rgb-veil), .05);      /* 安静的小标签底 */
-  --tint-soft: rgba(var(--rgb-veil), .02);    /* 面板里的次级面 */
+  --chip-bg: rgba(var(--rgb-veil), .055);     /* 安静的小标签底 */
+  --tint-soft: rgba(var(--rgb-veil), .026);   /* 面板里的次级面 */
   --hatch: rgba(255, 255, 255, .26);          /* 进度条斜纹高光 */
   --card-flat: var(--tint-soft);
   --card-flat-hi: var(--chip-bg);
-  --field-bg: rgba(var(--rgb-veil), .045);
-  --row-hover: rgba(var(--rgb-veil), .02);
+  --field-bg: rgba(var(--rgb-veil), .05);
+  --row-hover: rgba(var(--rgb-veil), .03);
   --grid-line: rgba(var(--rgb-ink), .022);
   --warm: rgb(var(--rgb-warm));
   --warm-faint: rgba(var(--rgb-warm), .08);
   --brick: #d1806b;
-  --surface-grad: linear-gradient(160deg, rgba(var(--rgb-surface), .78), rgba(var(--rgb-surface-2), .82));
+  /* 卡片透出背后的极光,叠在一起就是一整片灰绿雾。深底上不需要「半透明」
+     来营造通透感 —— 背景本来也没什么可透的。做得实一点,桌面才立得住。 */
+  --surface-grad: linear-gradient(160deg, rgba(var(--rgb-surface), .92), rgba(var(--rgb-surface-2), .95));
   --panel-grad: linear-gradient(165deg, rgb(var(--rgb-panel)), rgb(var(--rgb-surface-2)));
-  --shadow-card: 0 10px 34px rgba(var(--rgb-shadow), .38);
-  --shadow-soft: 0 8px 24px rgba(var(--rgb-shadow), .35);
-  --shadow-lift: 0 16px 38px rgba(var(--rgb-shadow), .4);
-  --shadow-hover: 0 18px 44px rgba(var(--rgb-shadow), .42);
-  --shadow-inset: inset 0 1px 0 rgba(var(--rgb-ink), .045);
+  --shadow-card: 0 10px 34px rgba(var(--rgb-shadow), .42);
+  --shadow-soft: 0 8px 24px rgba(var(--rgb-shadow), .38);
+  --shadow-lift: 0 16px 38px rgba(var(--rgb-shadow), .44);
+  --shadow-hover: 0 18px 44px rgba(var(--rgb-shadow), .46);
+  /* 上缘那道 1px 受光:深色 UI 里最能说明「这是个抬起来的面」的一笔 */
+  --shadow-inset: inset 0 1px 0 rgba(var(--rgb-ink), .075);
   --code-bg: rgba(var(--rgb-shadow), .35);
   --code-fg: rgba(var(--rgb-ink), .8);
   --stardust: 1;                  /* 星尘层:宣纸下收掉 */
@@ -220,12 +230,18 @@ body {
 }
 
 /* ===== 玻璃面板 ===== */
+/* 16px 的模糊在深底上没有「透」可言,只是把背后的极光抹成一团灰。
+   降到 12px、稍减饱和,让颜色回到卡面自己的面色上。 */
 .glass {
-  background: var(--surface-grad);
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  /* 半透明面上再叠一层「上亮下无」的竖向渐变:深色 UI 里卡片的立体感
+     几乎全靠这一笔,比加投影管用得多 —— 投影在深底上是看不见的。 */
+  background:
+    linear-gradient(180deg, rgba(var(--rgb-veil), .03), transparent 120px),
+    var(--surface-grad);
+  backdrop-filter: blur(12px) saturate(1.06);
+  -webkit-backdrop-filter: blur(12px) saturate(1.06);
   border: 1px solid var(--border-hair);
-  border-radius: 14px;
+  border-radius: 16px;
   box-shadow: var(--shadow-card), var(--shadow-inset);
 }
 
@@ -365,8 +381,8 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
 .md-content .md-table tr:hover td { background: var(--tint-soft); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(var(--rgb-ink), .12); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(var(--rgb-ink), .2); }
+::-webkit-scrollbar-thumb { background: rgba(var(--rgb-ink), .16); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--rgb-ink), .26); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 ::selection { background: rgba(var(--rgb-glow), .25); }
@@ -670,7 +686,9 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
   background: #ffffff;
   border-color: rgba(var(--rgb-warn), .22);
 }
-:root[data-theme="stitch"] .needs-list li { background: rgba(var(--rgb-warn), .06); }
+
+/* 长文本块在深底上更吃行距:密集的评审记录、动态流按 1.85 排 */
+:root[data-theme="ink"] .md-content { line-height: 2.02; }
 
 /* 发光文字在深底上是"亮",在浅底上只会糊成一圈脏影 —— 浅色主题一律改用色块表示选中 */
 :root[data-theme="stitch"] .nav-link.router-link-active {

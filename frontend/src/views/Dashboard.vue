@@ -450,7 +450,9 @@ onBeforeUnmount(() => {
 .goals-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
 .goals-head h3 { margin: 0; font-size: 12.5px; font-weight: 400; letter-spacing: .22em; color: var(--text-moon); }
 .goals-sub { font-size: 10.5px; color: var(--text-faint); }
-.goal-list { display: flex; flex-direction: column; gap: 2px; }
+.goal-list { display: flex; flex-direction: column; gap: 0; }
+/* 目标行之间给一条发丝线:否则三五行摞在一起,像一张没画格的表 */
+.goal + .goal { box-shadow: inset 0 1px 0 var(--border-hair); }
 .goal {
   appearance: none; text-align: left; cursor: pointer; background: none; border: 0; width: 100%;
   padding: 10px 10px 9px; border-radius: 9px;
@@ -468,6 +470,12 @@ onBeforeUnmount(() => {
 .gs-review { color: var(--st-warn); background: rgba(var(--rgb-warn), .12); }
 .gs-done { color: var(--st-ok); background: rgba(var(--rgb-ok), .1); }
 .gs-failed { color: var(--st-error); background: rgba(var(--rgb-error), .1); }
+/* 暂停不是「另一个普通状态」—— 它就是系统为什么不动的原因。
+   给它一道实边,让它在六个目标里第一个被看见。 */
+.gs-paused {
+  color: var(--text-moon); background: rgba(var(--rgb-veil), .07);
+  box-shadow: inset 0 0 0 1px var(--border-hair-strong);
+}
 .goal-title {
   flex: 1; min-width: 0; font-size: 13px; color: var(--text-moon); letter-spacing: .02em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
