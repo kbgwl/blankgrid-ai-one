@@ -843,9 +843,12 @@ function bumpStats(empId) {
   min-height: 380px;
   overflow: hidden;
 }
-/* 顶栏也是一段,不是浮在画布上的两块玻璃 */
+/* 顶栏也是一段,不是浮在画布上的两块玻璃。
+   z-index:3 是为了压住载入/失败/空组织那几张 inset:0 的说明卡 ——
+   它们盖画布是对的,盖住读数条和按钮就不对了。 */
 .stage-bar {
-  flex: none; display: flex; align-items: center; justify-content: space-between;
+  flex: none; position: relative; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 6px 14px 0;
 }
 /* 画布:唯一允许滚动的容器。scrollbar-gutter 常驻留出滚动条的位置 ——
