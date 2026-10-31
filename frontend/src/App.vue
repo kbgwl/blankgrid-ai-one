@@ -64,7 +64,8 @@
       <span class="alert-msg">{{ llmMessage }}</span>
       <router-link to="/settings" class="alert-go">去设置检查 →</router-link>
     </div>
-    <main class="main">
+    <!-- 组织页的读数带是页面的下边缘:它要贴到视口底,不能浮在 34px 的页面留白上 -->
+    <main class="main" :class="{ 'main-flush': $route.name === 'org' }">
       <router-view v-slot="{ Component }">
         <transition name="rv" mode="out-in">
           <component :is="Component" :key="$route.fullPath" />
@@ -348,6 +349,8 @@ async function doLogin() {
 .live-dot.is-run { background: var(--warm); box-shadow: 0 0 9px rgba(var(--rgb-warm), .5); animation: pulseDot 2.2s var(--ease-quiet) infinite; }
 @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: .32; } }
 .main { flex: 1; padding: 22px 26px 34px; position: relative; z-index: 1; }
+/* 组织页自带一条通到页面底边的读数带,再留 34px 底白就变成"带子下面还有一块黑" */
+.main.main-flush { padding-bottom: 0; }
 /* 账户欠费横幅:不是装饰,是把"为什么不动了"顶到最显眼处 */
 .llm-alert {
   margin: 10px 26px 0; padding: 9px 16px; display: flex; align-items: center; gap: 10px;
