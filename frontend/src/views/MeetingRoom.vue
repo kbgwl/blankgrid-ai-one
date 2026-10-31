@@ -574,6 +574,19 @@ function scrollBottom() {
   })
 }
 
+/**
+ * 有人说话就尽快把"议程聊到第几条、有没有新提示"刷新一次。
+ *
+ * <p>推送里只有这一句和它的信号,而议程覆盖、主持人提示是服务端按整场算的。
+ * 原来只能等 5 秒那一轮轮询,对方话都说完了界面上还没打勾 —— 实时监控慢半拍,
+ * 人就会去别处看。这里防抖 400ms:连着说几句只取一次,规则仍然只在服务端一份。
+ */
+let syncTimer = null
+function scheduleSync() {
+  if (syncTimer) clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => { syncTimer = null; syncDetail() }, 400)
+}
+
 function mergeSegment(seg) {
   if (!m.value || !seg) return
   if (m.value.segments.some(s => s.id === seg.id)) return
@@ -885,6 +898,7 @@ onMounted(async () => {
     if (!evt || !m.value) return
     if (evt.type === 'meeting-segment' && evt.meetingId === id) {
       mergeSegment(evt.segment)
+      scheduleSync()
     } else if (evt.type === 'meeting-state' && evt.meetingId === id) {
       if (evt.status === 'DELETED') { location.hash = '#/meetings'; return }
       if (evt.status && m.value.status !== evt.status) m.value.status = evt.status
@@ -913,6 +927,7 @@ onUnmounted(() => {
   if (offBus) offBus()
   if (ticker) clearInterval(ticker)
   if (poller) clearInterval(poller)
+  if (syncTimer) clearTimeout(syncTimer)
   stopMic()
 })
 </script>
