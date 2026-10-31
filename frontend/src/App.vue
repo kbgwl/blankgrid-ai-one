@@ -30,6 +30,7 @@
         <router-link to="/" class="nav-link" active-class="" exact-active-class="router-link-active">目标</router-link>
         <router-link to="/org" class="nav-link">组织</router-link>
         <router-link to="/board" class="nav-link">看板</router-link>
+        <router-link to="/meetings" class="nav-link">会议</router-link>
         <router-link to="/artifacts" class="nav-link">成果</router-link>
         <router-link to="/approvals" class="nav-link">
           自主

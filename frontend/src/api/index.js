@@ -138,7 +138,41 @@ export const api = {
   },
 
   // 成本:token 折算成钱
-  cost: () => http.get('/stats/cost').then(r => r.data)
+  cost: () => http.get('/stats/cost').then(r => r.data),
+
+  // ===== 会议:实时记录 → 总结版 / 原话版 → 行程 =====
+  meetings: () => http.get('/meetings', { timeout: LIST_TIMEOUT }).then(r => r.data),
+  meeting: (id) => http.get(`/meetings/${id}`, { timeout: LIST_TIMEOUT }).then(r => r.data),
+  createMeeting: (body) => http.post('/meetings', body).then(r => r.data),
+  deleteMeeting: (id) => http.delete(`/meetings/${id}`).then(r => r.data),
+  startMeeting: (id) => http.post(`/meetings/${id}/start`).then(r => r.data),
+  pauseMeeting: (id) => http.post(`/meetings/${id}/pause`).then(r => r.data),
+  resumeMeeting: (id) => http.post(`/meetings/${id}/resume`).then(r => r.data),
+  endMeeting: (id) => http.post(`/meetings/${id}/end`).then(r => r.data),
+  // 一条发言。speaker 为空表示"未标注",不要拿"我"去替
+  meetingSegment: (id, body) => http.post(`/meetings/${id}/segments`, body).then(r => r.data),
+  importTranscript: (id, transcript, defaultSpeaker) =>
+    http.post(`/meetings/${id}/import`, { transcript, defaultSpeaker }, { timeout: 60000 }).then(r => r.data),
+  meetingVerbatim: (id) => http.get(`/meetings/${id}/verbatim`).then(r => r.data),
+  // 纪要/行程是真发一次大模型,给足 3 分钟:长会要分段压要点
+  summarizeMeeting: (id, force) => http.post(`/meetings/${id}/summarize`, { force: !!force }, { timeout: 180000 }).then(r => r.data),
+  planItinerary: (id, force) => http.post(`/meetings/${id}/itinerary`, { force: !!force }, { timeout: 180000 }).then(r => r.data),
+  itineraryItemStatus: (itemId, status) => http.post(`/meetings/itinerary/${itemId}/status`, { status }).then(r => r.data),
+  assignItineraryTask: (itemId, employeeId, instruction) =>
+    http.post(`/meetings/itinerary/${itemId}/task`, { employeeId, instruction }).then(r => r.data),
+  markSegment: (segmentId) => http.post(`/meetings/segments/${segmentId}/mark`).then(r => r.data),
+  // kind: summary | verbatim | itinerary;格式 md / docx / pdf
+  downloadMeeting: async (id, kind, format, title) => {
+    const r = await http.get(`/meetings/${id}/download`, {
+      params: { kind, format: format || 'md' }, responseType: 'blob', timeout: 90000
+    })
+    const name = { summary: '会议纪要', verbatim: '原话实录', itinerary: '行程' }[kind] || '会议'
+    saveBlob(r.data, `${safeName(title)}-${name}.${format || 'md'}`)
+  },
+  downloadItineraryIcs: async (id, title) => {
+    const r = await http.get(`/meetings/${id}/itinerary.ics`, { responseType: 'blob', timeout: 30000 })
+    saveBlob(r.data, `${safeName(title)}-行程.ics`)
+  }
 }
 
 function safeName(s) {

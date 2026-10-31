@@ -1013,6 +1013,29 @@ public class CompanyEngineService {
             return;
         }
         ReviewResult r = parseReview(task.getResult());
+        if (!r.usable) {
+            // 评审没给出可用结论(空输出、被截断、通篇客套),这不是"成果 0 分"。
+            // 记成 0 分会白白吃掉一次返工轮次,几轮之后成果就被判死,
+            // 而页面上只剩一句「评审未通过(0 分)」—— 谁也看不出真正坏的是评审环节。
+            int bad = d.getReviewAttempts() + 1;
+            d.setReviewAttempts(bad);
+            d.setCurrentTaskId(null);
+            d.setUpdatedAt(Instant.now());
+            d.setReviewNotes("评审没返回可用结论(第 " + bad + " 次):" + clip(nz(task.getResult()), 600));
+            if (bad < 3) {
+                d.setStatus(Deliverable.REVIEW);
+                delRepo.save(d);
+                activity(Activity.REPORT, "「" + d.getTitle() + "」评审没返回可用结论(第 " + bad
+                        + " 次),不扣返工轮次,重新排一次评审。", g == null ? null : g.getId());
+                createReviewTask(d, art);
+                if (g != null) pushGoal(g.getId());
+                return;
+            }
+            delRepo.save(d);
+            blockDeliverable(d, "评审连续 3 次没有返回可用结论 —— 坏的是评审环节(模型输出为空或被截断),"
+                    + "不是成果不行。换一个评审模型,或在项目页点「重试受阻」再走一遍。");
+            return;
+        }
         int threshold = settings.get().reviewThreshold;
         boolean pass = r.pass && r.score >= threshold;
         art.setScore(r.score);
@@ -1652,32 +1675,13 @@ public class CompanyEngineService {
         pusher.push("goal-update", p);
     }
 
-    private record ReviewResult(int score, boolean pass, String summary, String notes, JsonNode needsInput) {}
+    /** @param usable 这份输出能不能当结论用;false 表示评审环节没说清楚,不是成果不行 */
+    private record ReviewResult(int score, boolean pass, String summary, String notes, JsonNode needsInput, boolean usable) {}
 
     private ReviewResult parseReview(String raw) {
-        String text = nz(raw);
-        try {
-            JsonNode n = mapper.readTree(extractJson(text));
-            int score = Math.max(0, Math.min(100, n.path("score").asInt(0)));
-            boolean pass = n.path("pass").asBoolean(false);
-            String summary = n.path("summary").asText("");
-            StringBuilder notes = new StringBuilder(n.path("notes").asText(""));
-            JsonNode must = n.path("mustFix");
-            if (must.isArray()) {
-                for (JsonNode x : must) {
-                    if (!x.asText("").isBlank()) notes.append("\n- ").append(x.asText());
-                }
-            }
-            return new ReviewResult(score, pass, summary, notes.toString(), n.path("needsInput"));
-        } catch (Exception e) {
-            int score = 0;
-            boolean pass = false;
-            Matcher sm = Pattern.compile("\"?score\"?\\s*[:：]\\s*(\\d{1,3})").matcher(text);
-            if (sm.find()) score = Math.max(0, Math.min(100, Integer.parseInt(sm.group(1))));
-            Matcher pm = Pattern.compile("\"?pass\"?\\s*[:：]\\s*(true|false)", Pattern.CASE_INSENSITIVE).matcher(text);
-            if (pm.find()) pass = Boolean.parseBoolean(pm.group(1).toLowerCase(Locale.ROOT));
-            return new ReviewResult(score, pass, "评审输出未按 JSON 返回", clip(text, 3000), null);
-        }
+        // 解析细节在 ReviewParser 里,单独可测;这里只做一层类型转换
+        ReviewParser.Result p = ReviewParser.parse(mapper, raw);
+        return new ReviewResult(p.score(), p.pass(), p.summary(), p.notes(), p.needsInput(), p.usable());
     }
 
     private static String extractJson(String s) {

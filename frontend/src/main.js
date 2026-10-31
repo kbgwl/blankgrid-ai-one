@@ -12,6 +12,8 @@ import CommandCenter from './views/CommandCenter.vue'
 import GoalDetail from './views/GoalDetail.vue'
 import ArtifactLibrary from './views/ArtifactLibrary.vue'
 import Approvals from './views/Approvals.vue'
+import Meetings from './views/Meetings.vue'
+import MeetingRoom from './views/MeetingRoom.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -21,6 +23,8 @@ const router = createRouter({
     { path: '/goals/:id', name: 'goal-detail', component: GoalDetail },
     { path: '/org', name: 'org', component: OrgChart },
     { path: '/board', name: 'board', component: Dashboard },
+    { path: '/meetings', name: 'meetings', component: Meetings },
+    { path: '/meetings/:id', name: 'meeting-room', component: MeetingRoom },
     { path: '/artifacts', name: 'artifacts', component: ArtifactLibrary },
     { path: '/approvals', name: 'approvals', component: Approvals },
     { path: '/settings', name: 'settings', component: SettingsView },
