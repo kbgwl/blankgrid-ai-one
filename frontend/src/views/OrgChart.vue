@@ -235,12 +235,15 @@
     <div class="canvas-fade" :class="{ 'is-on': moreBelow }" aria-hidden="true"></div>
 
     <!-- 底部 HUD 带:实时事件流 · 部门负载 · 兵力仪表 -->
-    <footer class="hud-rail glass" ref="rail">
+    <footer class="hud-rail" ref="rail">
       <section class="hud-feed">
         <div class="hf-head">
           <span class="hf-title">实时事件流</span>
           <span class="hf-live" :class="{ quiet: !feedLines.length }"></span>
-          <span class="hf-hint">{{ feedLines.length ? '事件一到就入队' : '等待第一条施工事件' }}</span>
+          <!-- 原来这里常驻一句「事件一到就入队」:每时每刻都在说同一件不用说的话,
+               还把标题行右半边占着。换成一个会变的数 —— 数的是**看得见的**那几条,
+               不是队列长度:藏起来的还报数,读者会去找第三条在哪。 -->
+          <span class="hf-hint">{{ feedLines.length ? feedLines.slice(0, 2).length + ' 条在列' : '暂无事件' }}</span>
         </div>
         <!-- 空态提示放在固定高度的列表里,而不是另起一行。
              它另起一行的话,底部带会高 21px;而 fit() 是先量这条带再定缩放的,
@@ -263,11 +266,12 @@
       <section class="hud-load">
         <div class="hl-head">
           <span class="hl-title">部门负载</span>
+          <!-- 原来这四个点是「待机/执行中/异常/停用」—— 那是岗位状态,而这几根柱子
+               画的是「已完成 + 待处理」。图例解释的东西在图上根本不存在,
+               读者照着色点去找,找到的只有部门色。换成柱体自己的两段。 -->
           <div class="hud-legend">
-            <span class="lg"><i class="lg-dot lg-idle"></i>待机</span>
-            <span class="lg"><i class="lg-dot lg-run"></i>执行中</span>
-            <span class="lg"><i class="lg-dot lg-err"></i>异常</span>
-            <span class="lg"><i class="lg-dot lg-off"></i>停用</span>
+            <span class="lg"><i class="lg-sw is-done"></i>已完成</span>
+            <span class="lg"><i class="lg-sw is-pend"></i>待处理</span>
           </div>
         </div>
         <div class="hl-bars">
@@ -286,13 +290,23 @@
       </section>
 
       <section class="hud-gauges">
-        <div v-for="g in gauges" :key="g.label" class="gauge" :title="g.hint">
-          <svg viewBox="0 0 60 60" class="g-arc" aria-hidden="true">
-            <circle class="g-track" cx="30" cy="30" r="21" />
-            <circle class="g-val" cx="30" cy="30" r="21"
-                    :stroke="g.color" :stroke-dasharray="g.circ" :stroke-dashoffset="g.off" />
-          </svg>
-          <div class="g-read"><b :style="{ color: g.color }">{{ g.num }}</b><i>{{ g.label }}</i></div>
+        <!-- 左右两栏都有标题,这一栏原来光秃秃地摆四个环 —— 三栏里就它不像一栏。
+             补上同一高度、同一字距的标题,三条带子才在同一根线上起头。 -->
+        <div class="hg-head"><span class="hl-title">岗位态势</span></div>
+        <div class="hg-row">
+          <div v-for="g in gauges" :key="g.label" class="gauge" :title="g.hint">
+            <svg viewBox="0 0 60 60" class="g-arc" aria-hidden="true">
+              <circle class="g-track" cx="30" cy="30" r="21" />
+              <circle class="g-val" cx="30" cy="30" r="21"
+                      :stroke="g.color" :stroke-dasharray="g.circ" :stroke-dashoffset="g.off" />
+            </svg>
+            <!-- 0 的那个环里一根弧都没有。数字要是还跟其余三个一样亮,
+                 读者看到的是「仪表坏了」,而不是「这项是零」。 -->
+            <div class="g-read">
+              <b :style="{ color: Number(g.num) ? g.color : 'var(--text-faint)' }">{{ g.num }}</b>
+              <i>{{ g.label }}</i>
+            </div>
+          </div>
         </div>
       </section>
     </footer>
@@ -466,12 +480,12 @@ const crest = (() => {
   return { d: `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`, ticks }
 })()
 
-/* 自适应缩放:只按宽度缩,高度装不下就交给画布自己滚。
-   上一版是「一屏看全公司」当硬约束,宽高取小 —— 可 5 列 × 最深 6 人 = 1516 × 881,
-   任何窗口都装不下:1920 屏上被压到 0.772(正文 9.3px、数字 7.7px,左右各空 371px),
-   1400×664 上更是在 0.6 和 1.0 之间自己算自己(实测停在 1.0、图高 1399、横向溢出)。
-   缩了、糊了、还得滚 —— 三条全占。现在反过来:字不小于 0.8(正文 ≥9.6px),
-   空的宽度全给图,装不下的高度由画布滚。 */
+/* 自适应缩放:宽高取小。上一版只按宽度缩 —— 图铺满了,但 1920×960 上算出来
+   1.0,画布装不下,最后一行岗位卡被底带去齐截掉一截。那半截卡片比字号小半号
+   难看得多:读者看到的是「页面没画完」。
+   所以先问一句「一屏装得下吗」:装得下就装(1920×960 → 0.86,正文 9.4px,
+   左右各留 279)。装不下(矮窗口)才守住 MIN_SCALE,把剩下的高度交给画布滚,
+   底沿渐隐负责说明「下面还有」。 */
 const MIN_SCALE = 0.8
 const MAX_SCALE = 1
 const MAX_PAD = 150
@@ -499,7 +513,7 @@ function fit() {
   const base = layout(0)
   const availW = el.clientWidth - WRAP_PAD * 2
   const availH = el.clientHeight - WRAP_PAD * 2
-  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, availW / base.w))
+  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, availW / base.w, availH / base.h))
   viewScale.value = scale
   /* 高度真有富余(大屏、或者部门都很浅)才把行距摊开 —— 图挤在上面、底下空一片,
      和当年「表格永远顶着上沿」是同一个毛病。 */
@@ -607,7 +621,9 @@ const links = computed(() => {
 })
 
 /* 部门负载:五个部门排在同一条基线上,才能一眼比出谁压着活、谁今天没动。
-   柱高按「完成 + 待处理」的部门最大值归一到 44px,实心是已交付、斜纹是还压着。 */
+   柱高按「完成 + 待处理」的部门最大值归一到 44px,实心是已交付、斜纹是还压着。
+   有活就给 3px 保底 —— 4 件按 28 件归一之后只剩 6px,再被四舍五入抹平,
+   那根柱子就等于没有,读者看到的是一格空白。 */
 const LOAD_H = 44
 const loadBars = computed(() => {
   const s = stats.value
@@ -626,9 +642,10 @@ const loadBars = computed(() => {
     }
   })
   const max = Math.max(1, ...rows.map(r => r.done + r.pending))
+  const px = n => (n > 0 ? Math.max(3, Math.round(LOAD_H * n / max)) : 0)
   rows.forEach(r => {
-    r.donePx = Math.round(LOAD_H * r.done / max)
-    r.pendPx = Math.round(LOAD_H * r.pending / max)
+    r.donePx = px(r.done)
+    r.pendPx = px(r.pending)
     r.hint = r.done + r.pending === 0
       ? `${r.name}:今天还没派活`
       : `${r.name}:今日完成 ${r.done} 件 · 待处理 ${r.pending} 件`
@@ -849,7 +866,9 @@ function bumpStats(empId) {
 .stage-bar {
   flex: none; position: relative; z-index: 3;
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 6px 14px 0;
+  gap: 12px;
+  /* 和底部带同一个版心:顶栏两块玻璃的左右边缘,正好落在底带三栏的起止线上 */
+  padding: 6px max(20px, calc((100% - 1360px) / 2)) 0;
 }
 /* 画布:唯一允许滚动的容器。scrollbar-gutter 常驻留出滚动条的位置 ——
    否则「有没有竖滚动条」会让 clientWidth 跳 8px,比例跟着跳,图来回抽一下。
@@ -857,20 +876,23 @@ function bumpStats(empId) {
    图一旦按 1.0 铺出来,画布就撑到图的宽度,于是「可用宽度」= 图的宽度 = 比例 1.0,
    自洽了,也就再也缩不下去 —— 上一版 1400×664 停在 1.0、横向溢出 156px 就是这么来的。 */
 .canvas-wrap {
-  flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px;
+  flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; padding: 14px 14px 26px;
   position: relative; z-index: 1;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 .chart-svg { display: block; margin: 0 auto; }
 
-/* 画布底沿的渐隐:只在「下面还有内容」时出现,用 --rail-h 贴在底部带上沿 */
+/* 画布底沿:只在「下面还有内容」时出现。
+   试过 84px 的长渐隐,结果是最后一排卡在雾里露着图标和名字 —— 比硬裁更糟:
+   硬裁是「容器到头了」,半透明是「这里好像坏了」。
+   现在只留 18px 把边缘柔化掉,切口归底带上沿那条发丝线来解释。 */
 .canvas-fade {
   position: absolute; left: 0; right: 0; z-index: 2;
-  bottom: calc(var(--rail-h, 122px) + 10px);
-  height: 42px; pointer-events: none; opacity: 0;
+  bottom: var(--rail-h, 120px);
+  height: 18px; pointer-events: none; opacity: 0;
   transition: opacity .3s var(--ease-quiet);
-  background: linear-gradient(180deg, transparent, var(--bg-ink) 94%);
+  background: linear-gradient(180deg, transparent, var(--bg-ink) 96%);
 }
 .canvas-fade.is-on { opacity: 1; }
 
@@ -1010,7 +1032,7 @@ function bumpStats(empId) {
 .ld-text { font-size: 11.5px; letter-spacing: .28em; color: var(--text-dim); }
 
 /* HUD 面板统一切角:作战台的板子用同一个倒角 */
-.chart-status, .chart-actions, .hud-rail {
+.chart-status, .chart-actions {
   --cham: 10px; border-radius: 0;
   clip-path: polygon(var(--cham) 0, 100% 0, 100% calc(100% - var(--cham)),
                      calc(100% - var(--cham)) 100%, 0 100%, 0 var(--cham));
@@ -1038,46 +1060,83 @@ function bumpStats(empId) {
 .hud-read i { font-style: normal; font-size: 9.5px; letter-spacing: .2em; color: var(--text-faint); }
 .clock { font-family: var(--font-mono); font-size: 13px; color: var(--glow-cyan); letter-spacing: .1em; }
 
-/* ===== 底部 HUD 带:一整条,内部三段用发丝线隔开 =====
-   原来它是三块各自带玻璃底的小板并排,最右边那块仪表悬在 384px 负载条之后,
-   中间一段空当,读起来像"漂出去的一张卡"。合成一条之后,左中右是一个东西。 */
+/* ===== 底带:它不是第四块板,是画布的下沿 =====
+   原来这一条带整块套 .glass —— 四边描边 + 圆角 + 投影 + 切角,于是页面底部又
+   多出一个"盒子"。而它里面装的是三栏状态,不是一张卡:卡有边界,状态没有。
+   现在只留一道上边线把它从画布上划开,去掉底、去掉圆角、去掉切角,
+   左右通栏到底 —— 组织图是这一页唯一的实体,它退成一条读数刻度。 */
 .hud-rail {
   flex: none; position: relative; z-index: 3;
-  margin: 0 14px 10px;
   display: flex; align-items: stretch;
+  margin: 0;
+  /* 超宽屏上三栏不许跟着屏幕一起拉长:拉长之后事件流一行能排六十个中文字,
+     读起来是日志滚屏而不是一条状态。版心 1440,多出来的宽度还给两侧留白。 */
+  padding: 7px max(20px, calc((100% - 1360px) / 2)) 7px;
+  border-top: 1px solid var(--border-hair);
+  /* 舞台底那层透视网格一直铺到页面最下沿:底带若完全透明,两行小字就压在
+     网格线上。给一层「上薄下厚」的页面底色 —— 盖得住网格,又不像一块卡。 */
+  background: linear-gradient(180deg,
+    rgba(var(--rgb-surface-2), .9) 0, rgba(var(--rgb-surface-2), .96) 100%);
 }
-/* 事件流拿走剩下的全部宽度。它原来是写死的 340px —— 那句话放不下,
-   于是每一条都以「…」收尾,五条读下来一条也没读完。宽度给够,字就不用砍。 */
-.hud-feed { flex: 1 1 auto; min-width: 240px; padding: 8px 16px 7px; }
-.hf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-.hf-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); }
+/* 浅色两套 --org-fx 是 0,网格根本不画 —— 那底带就不需要底色去盖它。
+   再叠一层只会得到一条比纸更亮的横条,像张白纸条贴在页脚。 */
+:root[data-theme="paper"] .hud-rail,
+:root[data-theme="stitch"] .hud-rail { background: none; }
+/* 竖分隔只在中间那段高度上出现。通顶会把一条带切成三块板,收进来才是同一条里的三栏。 */
+.hud-load::before, .hud-gauges::before {
+  content: ''; position: absolute; left: 0; top: 13px; bottom: 2px; width: 1px;
+  background: linear-gradient(180deg,
+    transparent, var(--border-hair) 22%, var(--border-hair) 78%, transparent);
+}
+
+/* --- 左栏:事件流。它拿走剩下的全部宽度 --- */
+.hud-feed {
+  flex: 1 1 auto; min-width: 240px; padding-right: 22px;
+  display: flex; flex-direction: column;
+}
+.hf-head { display: flex; align-items: center; gap: 7px; height: 11px; margin-bottom: 5px; }
+.hf-title { font-size: 10px; letter-spacing: .3em; color: var(--text-dim); }
 .hf-live {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--st-running);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--st-running);
   box-shadow: 0 0 7px rgba(var(--rgb-glow), .8); animation: dotBlink 2s ease-in-out infinite;
 }
 .hf-live.quiet { background: var(--st-off); box-shadow: none; animation: none; }
-.hf-hint { font-size: 9.5px; letter-spacing: .1em; color: var(--text-faint); margin-left: auto; }
-.hf-list { position: relative; height: 96px; overflow: hidden; }
+.hf-hint { font-size: 9.5px; letter-spacing: .08em; color: var(--text-faint); margin-left: auto; }
+.hf-list { position: relative; flex: 1 1 auto; min-height: 80px; overflow: hidden; }
+/* 标签列原来是 auto 宽:CEO 占两字宽、交活占两字宽、战略指南占四字宽,
+   于是每一行的正文起点都不一样,几条横线读下来像被人推歪的稿纸。
+   定宽 + 右对齐,标签贴着正文站住,正文列才真是一列。
+   时间也不再被推到行的最右边 —— 那一推,一句话和它的时刻之间隔了八百像素,
+   眼睛得横着飞一趟才知道这是同一条。现在它紧跟在句尾。 */
 .hf-line {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline; gap: 8px; padding: 1.5px 0;
+  display: flex; align-items: baseline; gap: 10px; padding: 2px 0;
 }
 .hf-tag {
-  font-size: 8.5px; letter-spacing: .1em; padding: 1px 6px; border-radius: 3px;
+  flex: 0 0 44px; font-size: 8.5px; letter-spacing: .06em; padding: 1px 5px; border-radius: 3px;
   border: 1px solid var(--border-hair); color: var(--text-dim); white-space: nowrap;
+  text-align: right; overflow: hidden; text-overflow: ellipsis;
 }
 /* 同类型连着来时不重复标签:隐掉但占位,列不会跳 */
 .hf-tag.is-dup { visibility: hidden; }
 .hf-text {
-  display: block; font-size: 11px; line-height: 1.5; color: var(--text-dim);
+  display: block; flex: 0 1 auto; min-width: 0;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-dim);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
+/* 越往下越旧,越旧越轻 —— 不给渐变的话三条小字一样重,读不出哪条是刚到的 */
+.hf-list > div > .hf-line:nth-child(2) .hf-text { opacity: .74; }
+.hf-list > div > .hf-line:nth-child(3) .hf-text { opacity: .5; }
+.hf-list > div > .hf-line:nth-child(n + 3) { display: none; }
+/* 只留两条。这条带每高一像素,画布就少一像素 —— 而 1920×960 上差的是最后
+   那一排岗位卡能不能整张露出来。第一版放五条,是当它是日志窗口;它其实只是
+   一句「现在在干什么」,最新两条就够,翻旧账去别的页。 */
 /* 最新一条给两行 —— 它才是你真正要读的那句 */
 .hf-line.is-head .hf-text {
+  opacity: 1; font-size: 12.5px;
   white-space: normal;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
 }
-.hf-time { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.hf-time { flex: none; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
 /* 队首那条是刚到的:clip 逐格揭开 + 光标收尾 */
 .hf-line.is-head .hf-text { animation: typeIn .8s steps(28, end) both; }
 .hf-line.is-head .hf-text::after {
@@ -1096,37 +1155,44 @@ function bumpStats(empId) {
 .tone-warn .hf-tag { border-color: rgba(var(--rgb-warn), .34); color: var(--st-warn); }
 .tone-error .hf-tag { border-color: rgba(var(--rgb-error), .34); color: var(--st-error); }
 .tone-plan .hf-tag { border-color: rgba(var(--rgb-plan), .34); color: var(--st-plan); }
-.hf-none { position: absolute; inset: 0; margin: 0; padding-top: 6px; font-size: 10.5px; letter-spacing: .1em; color: var(--text-faint); }
+.hf-none { position: absolute; inset: 0; margin: 0; padding-top: 4px; font-size: 11px; line-height: 1.6; letter-spacing: .06em; color: var(--text-faint); }
 
-/* ===== 部门负载:五个部门站在同一条基线上,才能横着比 ===== */
-.hud-load { flex: 0 0 384px; padding: 8px 16px 9px; border-left: 1px solid var(--border-hair); }
-.hl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
-.hl-title { font-size: 10.5px; letter-spacing: .26em; color: var(--text-dim); white-space: nowrap; }
-.hud-legend { display: flex; align-items: center; gap: 10px; }
-.lg { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; letter-spacing: .12em; color: var(--text-faint); }
-.lg-dot { width: 5px; height: 5px; border-radius: 50%; }
-.lg-idle { background: var(--st-idle); }
-.lg-run { background: var(--st-running); box-shadow: 0 0 6px rgba(var(--rgb-glow), .65); }
-.lg-err { background: var(--st-error); }
-.lg-off { background: var(--st-off); }
-.hl-bars {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
-  /* 一条基线把所有柱子串起来:没有它,五根高低不同的柱各浮各的,读不出"比" */
-  border-bottom: 1px solid var(--border-hair-strong);
-  padding-top: 15px;   /* 给最高的那根柱子顶上的数字留位置 */
+/* --- 中栏:部门负载。五根柱子站在同一条基线上,才能横着比 --- */
+.hud-load {
+  flex: 0 0 400px; padding: 0 20px; position: relative;
+  display: flex; flex-direction: column;
 }
-.hl-bar { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.hl-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 11px; margin-bottom: 5px; }
+.hl-title { font-size: 10px; letter-spacing: .3em; color: var(--text-dim); white-space: nowrap; }
+.hud-legend { display: flex; align-items: center; gap: 11px; }
+.lg { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; letter-spacing: .06em; color: var(--text-faint); white-space: nowrap; }
+.lg-sw { width: 7px; height: 7px; border-radius: 1.5px; flex: none; }
+.lg-sw.is-done { background: rgba(var(--rgb-veil), .46); }
+.lg-sw.is-pend {
+  background-image: repeating-linear-gradient(45deg,
+    rgba(var(--rgb-warn), .9) 0 1.5px, transparent 1.5px 3px);
+  box-shadow: inset 0 0 0 1px rgba(var(--rgb-warn), .34);
+}
+.hl-bars {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 12px;
+  flex: 1 1 auto;
+  /* 一条基线把所有柱子串起来:没有它,五根高低不同的柱各浮各的,读不出"比" */
+  border-bottom: 1px solid var(--border-hair);
+  padding-top: 14px;   /* 给最高的那根柱子顶上的数字留位置 */
+}
+.hl-bar { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .hl-track {
-  position: relative; width: 30px; height: 44px;
+  position: relative; width: 44px; height: 48px;
   display: flex; flex-direction: column; justify-content: flex-end;
 }
 .hl-num {
   position: absolute; left: 50%; transform: translateX(-50%);
   font: 600 11px/1 var(--font-mono); color: var(--text-moon); white-space: nowrap;
+  letter-spacing: .02em;
 }
 .hl-pend-num { font-style: normal; color: var(--st-warn); font-size: 9px; margin-left: 1px; }
 .hl-fill { display: block; width: 100%; flex: none; }
-.hl-fill.is-done { opacity: .85; border-radius: 2px 2px 0 0; }
+.hl-fill.is-done { opacity: .78; border-radius: 2px 2px 0 0; }
 /* 待处理用斜纹:实心是已经交出去的活,斜纹是还压在这一格上的 */
 .hl-fill.is-pend {
   background-image: repeating-linear-gradient(45deg,
@@ -1134,9 +1200,9 @@ function bumpStats(empId) {
   background-color: rgba(var(--rgb-warn), .18);
 }
 .hl-name {
-  font-size: 9.5px; letter-spacing: .1em; white-space: nowrap;
+  font-size: 9px; letter-spacing: .04em; white-space: nowrap;
   max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  color: var(--dept-color);
+  color: var(--dept-color); opacity: .88;
 }
 
 /* ===== 落款:竖排进右侧留白,像画上的边款 ===== */
@@ -1150,16 +1216,19 @@ function bumpStats(empId) {
 }
 
 .hud-gauges {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 12px;
-  padding: 8px 18px 9px; border-left: 1px solid var(--border-hair);
+  flex: 0 0 auto; position: relative; padding: 0 0 0 20px;
+  display: flex; flex-direction: column;
 }
-.gauge { position: relative; width: 58px; height: 58px; }
-.g-arc { width: 58px; height: 58px; transform: rotate(-90deg); display: block; }
-.g-track { fill: none; stroke: var(--border-hair-strong); stroke-width: 5; }
-.g-val { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset .9s var(--ease-out); }
-.g-read { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2px; }
-.g-read b { font-family: var(--font-mono); font-size: 16px; font-weight: 600; line-height: 1; }
-.g-read i { font-style: normal; font-size: 8.5px; letter-spacing: .14em; color: var(--text-faint); }
+.hg-head { height: 11px; margin-bottom: 5px; display: flex; align-items: center; }
+.hg-row { flex: 1 1 auto; display: flex; align-items: center; gap: 9px; }
+.gauge { position: relative; width: 56px; height: 56px; }
+.g-arc { width: 56px; height: 56px; transform: rotate(-90deg); display: block; }
+/* 环收细一档:5px 的环在 56px 的圈里是根粗笔,四根并排像四个甜甜圈架 */
+.g-track { fill: none; stroke: rgba(var(--rgb-veil), .085); stroke-width: 3.5; }
+.g-val { fill: none; stroke-width: 3.5; stroke-linecap: round; transition: stroke-dashoffset .9s var(--ease-out); }
+.g-read { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 3px; }
+.g-read b { font-family: var(--font-mono); font-size: 15px; font-weight: 600; line-height: 1; letter-spacing: -.02em; }
+.g-read i { font-style: normal; font-size: 8px; letter-spacing: .12em; color: var(--text-faint); }
 
 /* ===== 节点卡片 ===== */
 .node-card {
@@ -1363,43 +1432,41 @@ function bumpStats(empId) {
   .chart-slogan { display: none; }
 }
 /* 窗口矮的时候,底部带每多 10px 就是从图上抢 10px。
-   把事件流降到 3 条、柱子降一档、仪表收一号,整条带从 132 掉到 110 左右;
-   再往下(笔记本半屏那种)就让它继续收,反正图上还能滚。 */
+   事件流降到两条、柱子降一档、仪表收一号;再往下(笔记本半屏那种)继续收,
+   反正画布上还能滚。 */
 @media (max-height: 820px) {
-  .hf-list { height: 78px; }
-  .hf-line:nth-child(n + 4) { display: none; }
-  .hud-feed { padding: 6px 12px 5px; }
+  .hud-rail { padding: 7px 16px 5px; }
+  .hf-head, .hl-head, .hg-head { height: 13px; margin-bottom: 5px; }
+  .hf-list { min-height: 58px; }
+  .hf-line.is-head .hf-text { font-size: 11.5px; line-height: 1.45; }
   /* 柱顶那个数字是绝对定位的,它的位置 = 柱高 + 4,再往上 11px。
-     柱子压到 34 之后,padding-top 必须仍然容得下它,否则数字会顶进标题行。 */
-  .hl-bars { padding-top: 19px; }
-  .hl-track { height: 34px; }
-  .hud-gauges { gap: 8px; padding: 5px 10px; }
-  .gauge, .g-arc { width: 48px; height: 48px; }
+     柱子压矮之后,padding-top 必须仍然容得下它,否则数字会顶进标题行。 */
+  .hl-bars { padding-top: 15px; }
+  .hl-track { height: 36px; }
+  .gauge, .g-arc { width: 46px; height: 46px; }
+  .g-read b { font-size: 13px; }
 }
 
 @media (max-width: 1180px) {
-  /* 三块并排本来就挤:负载和仪表各收一号,把宽度让给事件流 ——
+  /* 三栏并排本来就挤:负载和仪表各收一号,把宽度让给事件流 ——
      它每行要放一句完整的话,窄 100px 就少读十个字。 */
-  .hud-load { flex: 0 0 262px; }
-  .hl-bars { gap: 6px; }
-  .hl-track { width: 20px; }
-  .hud-gauges { gap: 8px; padding: 6px 10px; }
-  .gauge, .g-arc { width: 50px; height: 50px; }
-  /* 面板收到 262 之后,「部门负载 + 四项图例」放不下一行 —— 图例会直接
-     叠到标题上。图上要解释的其实只有两种点(在跑/异常),其余两个删掉,
-     不是信息少了,是这一行原本就装不下四个。 */
-  .hud-legend { gap: 7px; }
-  .lg { font-size: 8.5px; letter-spacing: .04em; }
-  /* 要藏就藏整项。原来写的是 .lg-off —— 那只是那个小圆点的类名,
-     藏完剩下一句「停用」悬在那儿,前面没有点,像个没写完的图例。 */
-  .hud-legend .lg:last-child { display: none; }
+  .hud-rail { padding: 9px 14px 8px; }
+  .hud-load { flex: 0 0 246px; padding: 0 14px; }
+  .hl-bars { gap: 7px; }
+  .hl-track { width: 22px; }
+  .hud-gauges { padding-left: 14px; }
+  .hg-row { gap: 6px; }
+  .gauge, .g-arc { width: 48px; height: 48px; }
+  .hud-legend { gap: 8px; }
+  .lg { font-size: 8.5px; letter-spacing: .02em; }
 }
 @media (max-width: 900px) {
-  .hud-rail { flex-wrap: wrap; }
-  .hud-feed { flex: 1 1 100%; }
-  .hud-load { flex: 1 1 auto; }
-  .hud-legend { display: none; }
-  .hf-list { height: 60px; }
-  .gauge, .g-arc { width: 46px; height: 46px; }
+  .hud-rail { flex-wrap: wrap; gap: 10px 0; }
+  .hud-feed { flex: 1 1 100%; padding-right: 0; }
+  .hud-load { flex: 1 1 auto; padding-left: 0; }
+  .hud-load::before, .hud-gauges::before { display: none; }
+  .hud-gauges { padding-left: 14px; }
+  .hf-list { min-height: 52px; }
+  .gauge, .g-arc { width: 44px; height: 44px; }
 }
 </style>
