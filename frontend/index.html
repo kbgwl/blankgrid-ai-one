@@ -10,6 +10,13 @@
     (function () {
       var t = 'ink'
       try { t = localStorage.getItem('bg-theme') || 'ink' } catch (e) { /* 读不到就用默认 */ }
+      /* 只认这三套。存着一个已经不存在的主题名时,页面会沿用上上次的令牌,表现为"整个界面没样式" */
+      if (['ink', 'paper', 'stitch'].indexOf(t) < 0) t = 'ink'
+      /* 链接带 ?theme= 时以链接为准,首帧就是对的,不会先闪一下旧主题 */
+      try {
+        var q = new URLSearchParams(location.search).get('theme')
+        if (q && ['ink', 'paper', 'stitch'].indexOf(q) >= 0) t = q
+      } catch (e) { /* 老浏览器没有 URLSearchParams,按本地存的来 */ }
       document.documentElement.dataset.theme = t
     })()
   </script>
@@ -22,6 +29,10 @@
     :root[data-theme="paper"] {
       --boot-bg: #e9e2d3; --boot-fg: #1c1b17; --boot-ac: #a5462f;
       --boot-dim: rgba(28, 27, 23, .42);
+    }
+    :root[data-theme="stitch"] {
+      --boot-bg: #f5f3fa; --boot-fg: #1c1b1f; --boot-ac: #6750a4;
+      --boot-dim: rgba(28, 27, 31, .45);
     }
     html, body { margin: 0; height: 100%; background: var(--boot-bg); }
     #boot {

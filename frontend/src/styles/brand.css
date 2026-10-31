@@ -491,3 +491,194 @@ body, .glass { transition: background-color var(--dur-mid) var(--ease-quiet), co
   font-style: normal; margin-left: 5px; font-size: 9px;
   opacity: .55; letter-spacing: 0;
 }
+
+/* ===== 素白 · Stitch (Material 3) =====
+   第三套主题不是把墨夜调亮,而是换一套设计语言:
+   毛玻璃 → 实心白卡、极光星尘格纹 → 一层极淡的中心提亮、衬线标题 → 无衬线 600、
+   发光描边 → 1px 发丝边 + 两层投影(近处 1px 硬边、远处大范围柔影)。
+
+   令牌名一个没改,只是值不同 —— 所有组件、页面 scoped 样式都不用动。
+   这也是为什么它敢作为"另存一版"而不是"重写一遍":能退回去,才敢往前试。 */
+:root[data-theme="stitch"] {
+  /* 颜料通道:Material 3 baseline 紫,状态色取 M3 语义色 */
+  --rgb-ink: 28, 27, 31;
+  --rgb-glow: 103, 80, 164;      /* primary #6750A4 */
+  --rgb-warm: 125, 82, 96;       /* tertiary #7D5260 */
+  --rgb-error: 179, 38, 30;
+  --rgb-ok: 46, 125, 50;
+  --rgb-warn: 176, 84, 0;
+  --rgb-plan: 79, 70, 229;
+  --rgb-tech: 11, 87, 208;
+  --rgb-design: 176, 70, 120;
+  --rgb-veil: 255, 255, 255;
+  --rgb-shadow: 58, 48, 88;      /* 紫灰投影:纯黑在浅底上会脏 */
+  --rgb-surface: 255, 255, 255;
+  --rgb-surface-2: 253, 251, 255;
+  --rgb-panel: 255, 255, 255;
+  --rgb-panel-hi: 248, 244, 253;
+  --rgb-raise: 234, 221, 255;    /* primary-container */
+  --rgb-boss: 232, 240, 254;
+  --rgb-error-deep: 140, 29, 24;
+  --rgb-error-deeper: 108, 22, 18;
+  --rgb-on-error: 255, 246, 245;
+  --rgb-btn: 103, 80, 164;
+  --rgb-btn-hi: 121, 98, 182;
+  --rgb-on-btn: 255, 255, 255;
+
+  --bg-ink: #f5f3fa;
+  --bg-ink-2: #efeaf7;
+  --text-dim: rgba(var(--rgb-ink), .62);
+  --text-faint: rgba(var(--rgb-ink), .40);
+  --border-hair: rgba(var(--rgb-ink), .075);
+  --border-hair-strong: rgba(var(--rgb-ink), .16);
+
+  --glow-cyan-soft: #7a63b8;
+  --glow-cyan-dim: rgba(var(--rgb-glow), .88);
+  --glow-cyan-faint: rgba(var(--rgb-glow), .07);
+  --st-idle: rgba(var(--rgb-ink), .42);
+  --st-off: rgba(var(--rgb-ink), .16);
+
+  /* 表面:白卡不靠提亮蒙版,靠投影分层 */
+  --card-flat: rgba(255, 255, 255, .7);
+  --card-flat-hi: #ffffff;
+  --field-bg: #ffffff;
+  --row-hover: rgba(var(--rgb-glow), .045);
+  --chip-bg: rgba(var(--rgb-glow), .075);
+  --tint-soft: rgba(var(--rgb-ink), .022);
+  --hatch: rgba(var(--rgb-glow), .16);
+  --grid-line: rgba(var(--rgb-ink), .028);
+  --warm-faint: rgba(var(--rgb-warm), .09);
+  --brick: #b3261e;
+
+  --surface-grad: linear-gradient(180deg, #ffffff, #fdfbff);
+  --panel-grad: linear-gradient(180deg, #ffffff, #fdfbff);
+  /* 两层:1px 的硬边勾出轮廓,大范围柔影交代高度。M3 的 elevation 就是这个意思 */
+  --shadow-card: 0 1px 2px rgba(var(--rgb-shadow), .05), 0 12px 28px -14px rgba(var(--rgb-shadow), .22);
+  --shadow-soft: 0 1px 2px rgba(var(--rgb-shadow), .04), 0 8px 20px -12px rgba(var(--rgb-shadow), .18);
+  --shadow-lift: 0 2px 6px rgba(var(--rgb-shadow), .06), 0 20px 40px -18px rgba(var(--rgb-shadow), .24);
+  --shadow-hover: 0 4px 10px rgba(var(--rgb-shadow), .07), 0 26px 52px -20px rgba(var(--rgb-shadow), .26);
+  --shadow-inset: inset 0 1px 0 #ffffff;
+  --code-bg: #f6f2fb;
+  --code-fg: rgba(var(--rgb-ink), .8);
+  --on-error: rgb(var(--rgb-on-error));
+  --on-error-hi: #fff2f0;
+  --btn-solid: #6750a4;
+  --btn-solid-hover: #7962b6;
+  --btn-solid-border: #6750a4;
+  --btn-fg: #ffffff;
+
+  /* 氛围层全关:Stitch 出来的界面是干净的,不加星空 */
+  --stardust: 0;
+  --meteor-a: 0;
+  --fx-a: 0;
+}
+
+/* 画布只剩一层极淡的中心提亮 —— 浅底上再加极光会变成廉价渐变 */
+:root[data-theme="stitch"] .ink-canvas {
+  background:
+    radial-gradient(ellipse 72% 46% at 50% -8%, rgba(var(--rgb-glow), .06), transparent 66%),
+    var(--bg-ink);
+}
+:root[data-theme="stitch"] .ink-canvas::before,
+:root[data-theme="stitch"] .ink-canvas::after { display: none; }
+
+/* 卡片:不磨砂。毛玻璃在浅色底上叠出来的是一层灰雾,不是质感 */
+:root[data-theme="stitch"] .glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-radius: 22px;
+  border-color: rgba(var(--rgb-ink), .07);
+}
+/* 胶囊里的小标签跟着圆角走 */
+:root[data-theme="stitch"] .el-button,
+:root[data-theme="stitch"] .el-button--primary { border-radius: 999px; }
+/* 输入框:白底白卡叠在一起会"消失"。M3 的 outlined 字段靠一圈灰边定位,不靠底色 */
+:root[data-theme="stitch"] .el-input__wrapper,
+:root[data-theme="stitch"] .el-textarea__inner,
+:root[data-theme="stitch"] .el-select__wrapper {
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px rgba(var(--rgb-ink), .13) inset !important;
+}
+
+/* 主目标输入框本来是"无框、直接写在卡片上"的杂志式排版 —— 深底上成立,
+   浅底上就变成"看不出哪里能打字"。这里按 M3 outlined 给一圈发丝边,
+   和下面的补充背景保持同一种输入语言。 */
+:root[data-theme="stitch"] .goal-title-input .el-input__wrapper {
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px rgba(var(--rgb-ink), .13) inset !important;
+  border-radius: 12px !important;
+  padding: 4px 14px !important;
+}
+
+/* 进度条:2px 的横贯长条在浅底上像一道荧光笔。M3 是短、粗、纯色、两端全圆,
+   靠"填了多少"表达进度,不靠细线拉满整行 */
+:root[data-theme="stitch"] .goal-bar,
+:root[data-theme="stitch"] .task-prog {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(var(--rgb-glow), .12);
+}
+:root[data-theme="stitch"] .goal-bar i,
+:root[data-theme="stitch"] .task-prog i {
+  border-radius: 999px;
+  /* 组件里的 `.goal.is-need .goal-bar i` 特异性更高,不加 important 压不住。
+     这里要的正是"主题盖过组件状态色",所以是该用 important 的场景。 */
+  background: var(--glow-cyan) !important;
+}
+/* 「待你补」不再把整条进度染成警示色。
+   进度条回答的是"走了多远",橙色回答的是"有东西等你处理" —— 两件事叠在一条 4px 的线上,
+   看到的人只会以为这条路本身出了问题,而不是"路走得挺好,旁边有张单子等你签"。
+   状态交给下面 meta 里那行橙字,它本来就写得很清楚。 */
+
+/* 字重:细体在大片浅色上会显得发虚,Material 用 400 起 */
+:root[data-theme="stitch"] body { font-weight: 400; }
+/* 标题:衬线是墨韵的骨架,换到 M3 得用无衬线 —— 但字重要看字号给。
+   58px 的大标题用 600 会变成一堵黑墙,原设计靠 200 的细笔画和颜色拉开层次;
+   小的分区标题才需要 600 撑住。 */
+:root[data-theme="stitch"] .hero-title,
+:root[data-theme="stitch"] .hero-title .thin {
+  font-family: var(--font-sans);
+  font-weight: 300;
+  letter-spacing: .012em;
+}
+:root[data-theme="stitch"] .lib-title,
+:root[data-theme="stitch"] .head-title,
+:root[data-theme="stitch"] .section-title {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -.012em;
+}
+
+/* 成果正文:去掉 h2 左边那道发光竖条,改成 M3 的色块前缀 */
+:root[data-theme="stitch"] .md-content h2::before {
+  width: 3px;
+  background: var(--glow-cyan);
+  box-shadow: none;
+  border-radius: 3px;
+}
+:root[data-theme="stitch"] .md-content blockquote {
+  border-left: 3px solid rgba(var(--rgb-glow), .35);
+  background: rgba(var(--rgb-glow), .05);
+  border-radius: 0 12px 12px 0;
+}
+
+/* 「待你补料」:整块米橙色铺在浅紫底上会显脏,像一张旧纸。
+   M3 的做法是把提醒收进边框和左侧色条,底色还给白 —— 它仍然显眼,但不脏。 */
+:root[data-theme="stitch"] .needs,
+:root[data-theme="stitch"] .budget {
+  background: #ffffff;
+  border-color: rgba(var(--rgb-warn), .22);
+}
+:root[data-theme="stitch"] .needs-list li { background: rgba(var(--rgb-warn), .06); }
+
+/* 发光文字在深底上是"亮",在浅底上只会糊成一圈脏影 —— 浅色主题一律改用色块表示选中 */
+:root[data-theme="stitch"] .nav-link.router-link-active {
+  text-shadow: none;
+  background: rgba(var(--rgb-glow), .1);
+}
+:root[data-theme="stitch"] .nav-link::after { box-shadow: none; }
+
+/* 滚动条:浅底上用深灰,不能用白色提亮 */
+:root[data-theme="stitch"]::-webkit-scrollbar-thumb,
+:root[data-theme="stitch"] ::-webkit-scrollbar-thumb { background: rgba(var(--rgb-ink), .14); }

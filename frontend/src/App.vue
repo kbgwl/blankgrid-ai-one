@@ -46,6 +46,7 @@
       <div class="theme-switch" aria-label="主题">
         <button :class="{ on: theme === 'ink' }" @click="setTheme('ink')">墨夜</button>
         <button :class="{ on: theme === 'paper' }" @click="setTheme('paper')">宣纸</button>
+        <button :class="{ on: theme === 'stitch' }" @click="setTheme('stitch')">素白</button>
       </div>
       <div class="corp">
         <span class="live-dot" :class="running > 0 ? 'is-run' : 'is-on'"></span>
@@ -102,7 +103,16 @@ const llmBlocked = ref(false)
 const llmMessage = ref('')
 const pendingApprovals = ref(0)
 const clock = ref('')
-const theme = ref(document.documentElement.dataset.theme === 'paper' ? 'paper' : 'ink')
+// 认得的主题才接收,认不得的一律回墨夜 —— 免得 localStorage 里留着一个已删除的主题名,页面永远白屏
+const KNOWN_THEMES = ['ink', 'paper', 'stitch']
+const theme = ref(KNOWN_THEMES.includes(document.documentElement.dataset.theme)
+  ? document.documentElement.dataset.theme : 'ink')
+// 链接里能带主题(?theme=stitch):发给别人看截图、演示时,不用先教他去点哪个按钮
+const qTheme = new URLSearchParams(location.search).get('theme')
+if (qTheme && KNOWN_THEMES.includes(qTheme)) {
+  theme.value = qTheme
+  document.documentElement.dataset.theme = qTheme
+}
 const rpBusy = ref(false)
 const rpLabel = ref('')
 const replayReady = computed(() => /^\/goals\/[^/]+/.test(route.path) && motionOk())
