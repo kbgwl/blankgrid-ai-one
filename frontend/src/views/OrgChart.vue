@@ -8,7 +8,7 @@
       <div class="h-vig"></div>
     </div>
 
-    <div class="canvas-wrap" ref="wrap" :style="{ paddingBottom: railSpace + 'px' }">
+    <div class="canvas-wrap" ref="wrap">
       <svg :width="size.w * viewScale" :height="size.h * viewScale"
            :viewBox="`0 0 ${size.w} ${size.h}`" class="chart-svg" :style="tiltStyle">
         <defs>
@@ -308,7 +308,6 @@ const rippleIds = reactive(new Set())
 const spotIds = reactive(new Set())
 const viewScale = ref(1)
 const vPad = ref(0)
-const railSpace = ref(104)
 const hudRail = ref(null)
 const clock = ref('')
 let clockTimer = null
@@ -437,21 +436,27 @@ const crest = (() => {
   return { d: `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`, ticks }
 })()
 
-/* 自适应缩放:宽和高都参与取小,一屏看全公司;触到可读下限才允许横向平移
-   悬浮 HUD 占掉的那条带要从可用高度里先减掉,否则最后一行会被面板盖住;
-   宽度绑定(大屏常态)时把多余高度摊进行距 vPad,图纸才撑得满,不会底下空一片 */
-const MIN_SCALE = 0.66
+/* 自适应缩放:宽和高都参与取小,一屏看全公司;
+   高度富余(宽度先撞线,大屏常态)时把多余高度摊进行距 vPad,图纸才撑得满;
+   高度不够时守住 MIN_SCALE,宁可整页滚也不把字缩没。 */
+const MIN_SCALE = 0.6
 const MAX_PAD = 150
 const WRAP_PAD = 14
 function fit() {
   const el = wrap.value
   if (!el) return
-  const railH = hudRail.value ? hudRail.value.offsetHeight : 0
-  const band = Math.max(64, railH + 14)
-  railSpace.value = band
   const base = layout(0)
   const availW = el.clientWidth - WRAP_PAD * 2
-  const availH = Math.max(160, el.clientHeight - WRAP_PAD - band)
+  /* 可用高度不能问 el.clientHeight —— 画布现在是「由内容撑高」的,
+     问它就是拿上一轮的结果算这一轮。改成问视口:这一页从顶部到 HUD 之间还剩多少。
+     装不下时不再往死里缩(MIN_SCALE 以下字就没了),宁可让整页滚 —— 所以取
+     max(剩余高度, 图的「可读下限」),剩下交给页面滚动。 */
+  const stageTop = stage.value
+    ? stage.value.getBoundingClientRect().top + window.scrollY
+    : 0
+  const railH = hudRail.value ? hudRail.value.offsetHeight : 0
+  const room = window.innerHeight - stageTop - railH - WRAP_PAD * 2 - 18
+  const availH = Math.max(room, base.h * MIN_SCALE)
   const scale = Math.max(MIN_SCALE, Math.min(1, availW / base.w, availH / base.h))
   viewScale.value = scale
   /* h(pad) = h(0) + pad * (maxEmp + 1):部门行下沉、岗位首行、逐行间距各吃一份。
@@ -650,8 +655,9 @@ let ro = null
 onMounted(() => {
   ro = new ResizeObserver(fit)
   ro.observe(wrap.value)
-  /* HUD 带一长腿(事件流多一行、图例换行),预留高度就要重算,否则图纸白缩一圈 */
-  if (hudRail.value) ro.observe(hudRail.value)
+  /* 画布现在是「由内容撑高」的:窗口变矮,它的高度不会跟着变,ResizeObserver
+     就不会响。可 fit 算的是「视口里还剩多少」,所以必须直接听 resize。 */
+  window.addEventListener('resize', fit)
   tick()
   clockTimer = setInterval(tick, 1000)
   off = bus.on(evt => {
@@ -693,6 +699,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   off && off()
   ro && ro.disconnect()
+  window.removeEventListener('resize', fit)
   clockTimer && clearInterval(clockTimer)
 })
 
@@ -763,10 +770,17 @@ function bumpStats(empId) {
 .node-card.emp.rippling .st-hero b { animation: popScore .6s cubic-bezier(.34, 1.56, .64, 1) both; }
 
 .org-chart {
-  position: relative; height: calc(100vh - 140px);
-  display: flex; flex-direction: column; overflow: hidden;
+  position: relative;
+  /* 高度由内容说了算,但至少撑满一屏。
+     原来写死 calc(100vh - 140px) + overflow:hidden:窗口一矮,画布被压到
+     一两百像素,而底部那条 HUD 又是 absolute 浮在图上 —— 于是最后两排岗位卡
+     直接被面板盖住,面板自己还被视口切掉半截。 */
+  min-height: calc(100vh - 140px);
+  display: flex; flex-direction: column;
 }
-.canvas-wrap { flex: 1; min-height: 0; overflow: auto; padding: 14px; position: relative; z-index: 1; }
+/* 画布只负责横向兜底(窄屏放不下时左右挪),纵向让它自然长高 ——
+   高度不够的时候是整页往下滚,而不是在画布里再滚一层。 */
+.canvas-wrap { flex: 1 0 auto; min-height: 0; overflow-x: auto; overflow-y: hidden; padding: 14px; position: relative; z-index: 1; }
 .chart-svg { display: block; margin: 0 auto; }
 
 /* ===== 全息底:透视网格地平线 / 星尘 / 慢扫光 / 暗角(铺满整块舞台)
@@ -929,9 +943,12 @@ function bumpStats(empId) {
 .clock { font-family: var(--font-mono); font-size: 13px; color: var(--glow-cyan); letter-spacing: .1em; }
 
 /* ===== 底部 HUD 带:事件流(弹性) · 部门负载(固定) · 兵力仪表 ===== */
-/* ===== HUD 浮空带:贴在图纸下沿,不再从舞台里切走一条高度 ===== */
+/* 它是图纸下方的一条带,不是盖在图纸上的一块板。
+   原来用 absolute bottom:10px 浮在画布之上,窗口一矮就压住最后一排岗位卡,
+   还因为超出视口被切掉半截 —— 用户看到的「下面都挡住了」就是这个。 */
 .hud-rail {
-  position: absolute; left: 14px; right: 14px; bottom: 10px; z-index: 3;
+  position: relative; z-index: 3; flex: none;
+  margin: 0 14px 10px;
   display: flex; align-items: flex-end; gap: 14px;
   pointer-events: none;
 }
@@ -1248,10 +1265,37 @@ function bumpStats(empId) {
 @media (max-width: 1360px) {
   .chart-slogan { display: none; }
 }
+/* 窗口矮的时候,底部带每多 10px 就是从图上抢 10px。
+   把事件流降到 3 条、柱子降一档、仪表收一号,整条带从 132 掉到 110 左右;
+   再往下(笔记本半屏那种)就让它继续收,反正图上还能滚。 */
+@media (max-height: 820px) {
+  .hf-list { height: 78px; }
+  .hf-line:nth-child(n + 4) { display: none; }
+  .hud-feed { padding: 6px 12px 5px; }
+  /* 柱顶那个数字是绝对定位的,它的位置 = 柱高 + 4,再往上 11px。
+     柱子压到 34 之后,padding-top 必须仍然容得下它,否则数字会顶进标题行。 */
+  .hl-bars { padding-top: 19px; }
+  .hl-track { height: 34px; }
+  .hud-gauges { gap: 8px; padding: 5px 10px; }
+  .gauge, .g-arc { width: 48px; height: 48px; }
+}
+
 @media (max-width: 1180px) {
-  .hud-load { flex: 0 0 300px; }
+  /* 三块并排本来就挤:负载和仪表各收一号,把宽度让给事件流 ——
+     它每行要放一句完整的话,窄 100px 就少读十个字。 */
+  .hud-load { flex: 0 0 262px; }
   .hl-bars { gap: 6px; }
   .hl-track { width: 20px; }
+  .hud-gauges { gap: 8px; padding: 6px 10px; }
+  .gauge, .g-arc { width: 50px; height: 50px; }
+  /* 面板收到 262 之后,「部门负载 + 四项图例」放不下一行 —— 图例会直接
+     叠到标题上。图上要解释的其实只有两种点(在跑/异常),其余两个删掉,
+     不是信息少了,是这一行原本就装不下四个。 */
+  .hud-legend { gap: 7px; }
+  .lg { font-size: 8.5px; letter-spacing: .04em; }
+  /* 要藏就藏整项。原来写的是 .lg-off —— 那只是那个小圆点的类名,
+     藏完剩下一句「停用」悬在那儿,前面没有点,像个没写完的图例。 */
+  .hud-legend .lg:last-child { display: none; }
 }
 @media (max-width: 900px) {
   .hud-rail { flex-wrap: wrap; }
