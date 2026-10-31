@@ -56,6 +56,23 @@
               <feMergeNode in="b" /><feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
+          <!-- 法阵的径向渐隐:没有它,最外面那两道大环会在 viewBox 边上被硬切断,
+               看起来像"多了几根杂线";有了它,阵是自己散在黑暗里的。 -->
+          <radialGradient id="fmFade" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="520">
+            <stop offset="0%" stop-color="#fff" stop-opacity="1" />
+            <stop offset="34%" stop-color="#fff" stop-opacity=".92" />
+            <stop offset="62%" stop-color="#fff" stop-opacity=".42" />
+            <stop offset="100%" stop-color="#fff" stop-opacity="0" />
+          </radialGradient>
+          <!-- 阵眼冲上去的那道光柱:仙侠里"起阵"的第一笔,没有它,阵只是一圈地上的花纹 -->
+          <linearGradient id="fmPillar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--glow-cyan)" stop-opacity="0" />
+            <stop offset="62%" stop-color="var(--glow-cyan)" stop-opacity=".035" />
+            <stop offset="100%" stop-color="var(--glow-cyan)" stop-opacity=".16" />
+          </linearGradient>
+          <mask id="fmMask" maskUnits="userSpaceOnUse" x="-620" y="-620" width="1240" height="1240">
+            <rect x="-620" y="-620" width="1240" height="1240" fill="url(#fmFade)" />
+          </mask>
           <radialGradient id="coreHalo">
             <stop offset="0%" :stop-color="haloColor" stop-opacity=".5" />
             <stop offset="100%" :stop-color="haloColor" stop-opacity="0" />
@@ -70,18 +87,46 @@
           </linearGradient>
         </defs>
 
-        <!-- CEO 冠冕:只在上方展开的一段刻度弧。
-             原来是两圈整圆环 —— 半径 145 的下沿正好从部门卡和浮空芯片中间穿过,
-             虚线加刻度在深底上碎成一片噪点,还和芯片打架。
-             改成半圈:它替 CEO 画出「顶点」这一层,但永远不往下侵占部门的地盘。 -->
+        <!-- 法阵:整页压在一座阵里。
+             CEO 是阵眼,部门是阵位,连线是阵纹 —— 三道同心环 + 一圈符字,极淡、极慢地转。
+             这页原来"不仙"的根本原因是:所有纵深都靠渐变,图形是贴在纸面上的;
+             有了阵,纸面才有中心、有朝向、有转动 —— 一个正在运转的机关,而不是一张图。
+             全部乘 --org-fx:宣纸与素白是 0,纸上不画阵(那是墨夜的语言)。 -->
+        <g class="formation" aria-hidden="true" mask="url(#fmMask)"
+           :transform="`translate(${nodes.ceo.x}, ${nodes.ceo.y + 46.4})`">
+          <rect class="fm-pillar" x="-64" y="-250" width="128" height="250" fill="url(#fmPillar)" />
+          <!-- 内阵:贴着 CEO 卡片的一圈小阵 —— 结印的正盘。
+               卡片 250×92(半对角 133),所以 138 这道环刚好从卡外擦过,一圈符字悬在卡边。
+               整页唯一"读得出字"的部分在这里:远看是一圈光,近看是字。 -->
+          <g class="fm-turn">
+            <animateTransform v-if="!calm" attributeName="transform" type="rotate"
+                              from="0 0 0" to="360 0 0" dur="96s" repeatCount="indefinite" />
+            <circle class="fm-ring is-hot" r="132" />
+            <circle class="fm-ring" r="150" stroke-dasharray="2 9" />
+            <circle class="fm-ring is-soft" r="190" />
+            <circle class="fm-ring is-sweep" r="190" />
+            <!-- 十二个方位各一道短刺:环之间有了"格",才像刻出来的阵,不是画出来的圆 -->
+            <line v-for="t in fmSpokes" :key="'sp' + t.k" class="fm-spoke"
+                  x1="0" :y1="-t.r1" x2="0" :y2="-t.r2"
+                  :transform="`rotate(${t.a})`" />
+            <text v-for="r in innerRunes" :key="'ir' + r.k"
+                  :transform="`rotate(${r.a}) translate(0 -170)`"
+                  class="fm-rune is-major" :class="{ 'is-faint': r.k % 3 }">{{ r.ch }}</text>
+          </g>
+          <!-- 外阵:公司级的阵纹,极淡、极慢,反向转。它撑的是"场",不是"字"。 -->
+          <g class="fm-turn">
+            <animateTransform v-if="!calm" attributeName="transform" type="rotate"
+                              from="360 0 0" to="0 0 0" dur="320s" repeatCount="indefinite" />
+            <circle class="fm-ring is-ghost" r="300" stroke-dasharray="34 10 4 10" />
+            <text v-for="r in formationRunes" :key="'fr' + r.k"
+                  :transform="`rotate(${r.a}) translate(0 ${-r.r})`"
+                  class="fm-rune is-ghost" :class="{ 'is-major': r.major }">{{ r.ch }}</text>
+          </g>
+        </g>
+
+        <!-- 阵眼的光:一团压在卡片后面的冷光,单独一层,不参与转动 -->
         <g class="ceo-core" :transform="`translate(${nodes.ceo.x}, ${nodes.ceo.y})`" aria-hidden="true">
-          <ellipse class="core-halo" cx="0" cy="-26" rx="212" ry="132" fill="url(#coreHalo)" />
-          <path class="crest-arc" :d="crest.d" fill="none" :stroke="haloColor" />
-          <path class="crest-sweep" v-if="!calm" :d="crest.d" fill="none" :stroke="haloColor" />
-          <line v-for="t in crest.ticks" :key="'tk' + t.k" class="crest-tick"
-                :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2"
-                :stroke-width="t.major ? 1.3 : 1"
-                :stroke="haloColor" :stroke-opacity="t.major ? .5 : .26" />
+          <ellipse class="core-halo" cx="0" cy="-26" rx="196" ry="124" fill="url(#coreHalo)" />
         </g>
 
         <!-- 链路常驻:宽描边当辉光底,细描边当骨架;两者都跟着部门色 -->
@@ -199,6 +244,20 @@
               </div>
             </foreignObject>
           </template>
+        </g>
+
+        <!-- 结印:有人接活的那一下,从阵眼压下一道灵丝,在他头顶结一枚印。
+             这一页原来只有底部一行小字在变 —— 图上什么都不会发生。
+             把「事件」变成画面上的一次结印,才算把公司画成活的。 -->
+        <g v-if="seal" :key="seal.key" class="seal" aria-hidden="true">
+          <path class="seal-thread" :d="seal.d" :stroke="seal.color" fill="none" pathLength="1" />
+          <g :transform="`translate(${seal.x}, ${seal.y})`">
+            <circle class="seal-wave" r="30" :stroke="seal.color" />
+            <circle class="seal-wave is-late" r="30" :stroke="seal.color" />
+            <rect class="seal-frame" x="-26" y="-26" width="52" height="52" rx="3"
+                  :stroke="seal.color" pathLength="1" />
+            <text class="seal-ch" :fill="seal.color">令</text>
+          </g>
         </g>
       </svg>
     </div>
@@ -415,28 +474,48 @@ const tiltStyle = computed(() => ({
 function resetTilt() { tilt.x = 0; tilt.y = 0 }
 
 const haloColor = 'var(--glow-cyan)'
-/* 冠冕弧:以卡片中心为原点、圆心在下方的一段圆弧(R=170),从卡片左上斜上方
-   越过头顶落到右上。端点刻意收在 ±130(卡片半宽 125)之外一点,
-   这样圆弧永远不会压到卡片,也不会像整圆环那样垂到部门行里去。 */
-const crest = (() => {
-  const R = 170, CY = 46.4
-  const a0 = 220.1 * Math.PI / 180
-  const a1 = 319.9 * Math.PI / 180
-  const pt = (a, r) => ({
-    x: +(Math.cos(a) * r).toFixed(2),
-    y: +(CY + Math.sin(a) * r).toFixed(2)
-  })
-  const s = pt(a0, R), e = pt(a1, R)
-  const ticks = []
-  const N = 21
-  for (let k = 0; k < N; k++) {
-    const a = a0 + (a1 - a0) * k / (N - 1)
-    const major = k % 5 === 0
-    const p1 = pt(a, R), p2 = pt(a, R - (major ? 13 : 7))
-    ticks.push({ k, major, x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y })
+/* 阵纹:「顺为凡,逆则仙」六个字转满四圈。每圈头一个字加重 ——
+   一圈都是同等分量的字,读起来是噪点;有重音,环才有节,才像"刻"上去的。
+   r 每三个抖 12px,免得排成一把机械的等距齿。 */
+const RUNE_TEXT = '顺为凡逆则仙'.split('')
+const formationRunes = Array.from({ length: 36 }, (_, k) => ({
+  k,
+  a: (360 / 36) * k,
+  r: 300 + (k % 3 === 0 ? 9 : 0),
+  ch: RUNE_TEXT[k % RUNE_TEXT.length],
+  major: k % 6 === 0
+}))
+/* 内阵的十二个字:八卦四正 + 「天」「地」「人」「令」——
+   十二是一圈最少的数目,再多就糊成一个环,再少就不像"阵"了。 */
+const innerRunes = '乾坤震巽坎离艮兑天地人令'.split('').map((ch, k) => ({
+  k, a: (360 / 12) * k, ch
+}))
+/* 内阵四道环:132 / 150 / 190,加一圈符字站在 168 上。
+   再多一道环,卡边上就糊成一团毛 —— 阵要靠"疏密",不是靠"多"。 */
+const fmSpokes = Array.from({ length: 24 }, (_, k) => ({
+  k, a: (360 / 24) * k, r1: 192, r2: k % 2 ? 198 : 204
+}))
+
+/* 结印:有人接活的那一下,从阵眼拉一道灵丝过去,在他头顶结一枚印。
+   用 key 换实例来"重放"动画 —— 不用定时器,不用担心连点时排队。 */
+const seal = ref(null)
+let sealSeq = 0
+function sealAt(empId) {
+  if (calm || empId == null) return
+  const n = nodes.value.emps[empId]
+  const c = nodes.value.ceo
+  if (!n) return
+  const y0 = c.y + 46
+  const drop = n.y - y0
+  seal.value = {
+    key: ++sealSeq,
+    x: n.x,
+    y: n.y,
+    color: 'var(--glow-cyan)',
+    /* 灵丝从阵眼垂下来,先陡后缓,像被下面那张卡吸住 */
+    d: `M ${c.x} ${y0} C ${c.x} ${y0 + drop * .62}, ${n.x} ${n.y - drop * .3}, ${n.x} ${n.y}`
   }
-  return { d: `M ${s.x} ${s.y} A ${R} ${R} 0 0 1 ${e.x} ${e.y}`, ticks }
-})()
+}
 
 /* 自适应缩放:宽高取小。上一版只按宽度缩 —— 图铺满了,但 1920×960 上算出来
    1.0,画布装不下,最后一行岗位卡被底带去齐截掉一截。那半截卡片比字号小半号
@@ -714,6 +793,7 @@ onMounted(() => {
       applyStatus(evt.employeeId, evt.status, evt.currentTaskSummary)
       if (evt.status === 'RUNNING' && !wasRunning) {
         pushFeed('RUNNING', `${empName(evt.employeeId)} 接手 ${evt.currentTaskSummary || '新任务'}`)
+        sealAt(evt.employeeId)
       }
     } else if (evt.type === 'task-update' && evt.task?.employee?.id) {
       const t = evt.task
@@ -917,15 +997,87 @@ function bumpStats(empId) {
   0%, 100% { opacity: .5; transform: scale(.97); }
   50% { opacity: .92; transform: scale(1.03); }
 }
-.crest-arc { stroke-width: 1; stroke-opacity: .22; }
-/* 巡行高光:16px 长的一段亮弧沿冠冕走一圈(路径长约 296),像仪表上的扫描指针 */
-.crest-sweep {
-  stroke-width: 1.6; stroke-linecap: round;
-  stroke-dasharray: 16 300;
-  animation: crestSweep 7.5s linear infinite;
+/* 巡行高光挂在内阵最外那道环上:一段 26px 的亮弧,像指针一样慢慢走。
+   r=190 的周长是 1194,dashoffset 走满一圈才无缝。 */
+.fm-ring.is-sweep {
+  stroke-width: 1.4; stroke-linecap: round; stroke-opacity: .55;
+  stroke-dasharray: 26 1168;
+  animation: fmSweep 14s linear infinite;
 }
-@keyframes crestSweep { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -316; } }
-.crest-tick { stroke-linecap: round; }
+@keyframes fmSweep { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -1194; } }
+
+/* ===== 法阵:三道环 + 一圈符字,压在图纸最底下 =====
+   纸上(宣纸/素白)整层清掉 —— 那些主题的底是纤维与横线,再叠一座阵就脏了。
+   所以这一层直接乘 --org-fx,和透视地网共用同一个开关。 */
+.formation { pointer-events: none; opacity: var(--org-fx, 1); }
+.fm-ring {
+  fill: none; stroke: var(--glow-cyan); stroke-width: 1; stroke-opacity: .16;
+}
+.fm-ring.is-soft { stroke-opacity: .06; }
+/* 内阵两道环要压得住卡片的边:它是这页唯一的「印」,太淡就只剩一圈脏 */
+.fm-ring.is-hot { stroke-opacity: .34; stroke-width: 1.2; }
+.fm-rune {
+  fill: var(--glow-cyan); font-family: var(--font-serif); font-size: 11px;
+  text-anchor: middle; dominant-baseline: central; opacity: .14;
+}
+.fm-rune.is-major { font-size: 14px; opacity: .52; }
+.fm-rune.is-faint { font-size: 11px; opacity: .22; }
+/* 最外那道 300 环只负责"场":它在部门卡后面走,不许抢戏 */
+.fm-ring.is-ghost { stroke-opacity: .05; }
+.fm-rune.is-ghost { font-size: 10px; opacity: .07; }
+.fm-rune.is-ghost.is-major { opacity: .12; }
+.fm-spoke { stroke: var(--glow-cyan); stroke-width: 1; stroke-opacity: .22; }
+.fm-pillar { filter: blur(9px); animation: pillarBreath 6.4s var(--ease-quiet) infinite; }
+@keyframes pillarBreath { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ===== 结印:灵丝 + 印框 + 「令」字,一次 1.5 秒,播完自己消失 ===== */
+.seal { pointer-events: none; }
+.seal-thread {
+  stroke-width: 1.4; stroke-linecap: round;
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: sealThread 1.5s var(--ease-out) both;
+}
+@keyframes sealThread {
+  0%   { stroke-dashoffset: 1; opacity: 0; }
+  14%  { opacity: .55; }
+  58%  { stroke-dashoffset: 0; opacity: .55; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+.seal-wave {
+  fill: none; stroke-width: 1;
+  transform-box: fill-box; transform-origin: 50% 50%;
+  animation: sealWave 1.2s var(--ease-out) both;
+}
+.seal-wave.is-late { animation-delay: .24s; opacity: 0; }
+@keyframes sealWave {
+  0%   { transform: scale(.35); opacity: .75; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+/* 印框:一笔画出来的方印。pathLength=1 之后,dash 就是「画了几成」 */
+.seal-frame {
+  fill: none; stroke-width: 1.4;
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  transform-box: fill-box; transform-origin: 50% 50%;
+  animation: sealFrame 1.5s var(--ease-out) both;
+}
+@keyframes sealFrame {
+  0%   { stroke-dashoffset: 1; opacity: 0; transform: scale(1.4) rotate(-8deg); }
+  16%  { opacity: .95; }
+  38%  { stroke-dashoffset: 0; transform: scale(1) rotate(0deg); }
+  100% { stroke-dashoffset: 0; opacity: 0; transform: scale(.92); }
+}
+.seal-ch {
+  font-family: var(--font-serif); font-size: 22px; font-weight: 500;
+  text-anchor: middle; dominant-baseline: central;
+  transform-box: fill-box; transform-origin: 50% 50%;
+  animation: sealCh 1.5s var(--ease-out) both;
+}
+@keyframes sealCh {
+  0%, 20% { opacity: 0; transform: scale(1.7); }
+  34%     { opacity: .95; transform: scale(1); }
+  72%     { opacity: .45; }
+  100%    { opacity: 0; transform: scale(.95); }
+}
 
 /* ===== 载入失败:浮在图纸中央的一张说明卡 ===== */
 .org-fail {
